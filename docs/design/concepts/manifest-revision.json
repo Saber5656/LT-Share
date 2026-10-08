@@ -1,0 +1,32 @@
+[
+  {
+    "generation_order": 1,
+    "file": "docs/design/concepts/post-preview-form-revised.png",
+    "source_path": "~/.codex/generated_images/01a11cab-8558-79c0-a8e8-eefbb58770ad/exec-bcd0b01d-7218-452d-85cd-b06322643fce.png",
+    "prompt": "Use case: ui-mockup\nAsset type: revised mobile app screen concept\nPrimary request: Generate ONE polished mobile screen, 390 x 844 portrait, app content only. Use the attached selected concept as the visual reference and keep its visual language exactly: white base surface, near-black text, black primary button, light gray chips/tints, thin gray dividers, generous whitespace, no shadows, no cards inside cards, typography resembling Noto Sans JP + Inter.\nComposition/framing: a clean step-by-step numbered form. Header row: \"LT Share on X\" left bold and \"次の投稿へ ›\" right. Under header, small muted line \"3本目の投稿案\". Body has four numbered steps with small numbered circles, labels, spacing, and thin dividers: 1. Label \"ハッシュタグ\", muted note \"複数可・次の投稿に引き継ぎ\". Show removable tag chips \"#TechLTNight ×\" and \"#Rust ×\", followed by text input placeholder \"＋ タグを追加\". 2. Label \"記録\". Medium 16:9 photo thumbnail showing a conference projector slide titled \"RustでつくるCLI\", audience heads in foreground, warm venue light. Small check status \"端末に保存済み\" below. On right of label row, compact outline button with camera icon and text \"記録する\", plus small segmented control \"写真 | 動画\". 3. Label \"投稿文\", muted right-aligned \"ChatGPTで生成\". Text field showing exactly: \"RustでCLIツールを作るLT。clapで引数処理を書き、cargo-distで配布まで自動化する流れを紹介。小さく作って早く配る実践例として参考になる。\" Small muted counter at bottom right: \"X換算 152 / 280\". 4. Label \"開発者をポストに含める\" with OFF toggle on right, helper text \"ONで本文末尾に「開発者：」を追加\". Fixed bottom area: one full-width large black rounded button \"ポスト確認\". Text must be exactly as specified, all UI text Japanese exactly as written. Body text 14-16px equivalent, nothing clipped or stretched. Constraints: never show \"投稿済み\"; no X logo or Twitter bird; no @account search UI; no extra features; no device bezel, notch, status bar, clock, battery, home indicator, browser chrome; if any date appears use 2026-10-09 (Fri) evening context. Avoid: shadows, nested cards, decorative gradients, unreadable text, extra controls."
+  },
+  {
+    "generation_order": 2,
+    "file": "mock/public/assets/photos/lt1-ci.jpg",
+    "source_path": "~/.codex/generated_images/01a11cab-8558-79c0-a8e8-eefbb58770ad/exec-a6a7089a-77f6-4416-a633-465ff792b6db.png",
+    "prompt": "Use case: photorealistic-natural\nAsset type: prototype photo asset, landscape 16:9\nPrimary request: realistic candid photo taken from an audience seat at a Japanese developer lightning-talk event in the evening. Projector screen with one slide, a few audience heads silhouetted in the foreground, warm dim venue lighting, slight phone-camera softness. The slide must visibly and accurately read: title \"CIを5分速くした話\"; subtitle \"キャッシュと並列化の実践\". Scene/backdrop: small indoor tech meetup venue, projector screen centered, audience seated in foreground. Composition/framing: landscape 16:9, natural audience-seat viewpoint, slide readable, no readable faces in focus. Lighting/mood: warm evening venue light mixed with cool projector glow. Constraints: no logos of real companies or projects, no Rust logo, no crab mascot, no GitHub/X/OpenAI logos, no watermark, no UI overlays. Avoid: extra slides, extra readable text, close-up faces, distorted typography, device bezel."
+  },
+  {
+    "generation_order": 3,
+    "file": "mock/public/assets/photos/lt2-api-types.jpg",
+    "source_path": "~/.codex/generated_images/01a11cab-8558-79c0-a8e8-eefbb58770ad/exec-029436fd-93d1-4162-a049-66053f6c7c85.png",
+    "prompt": "Use case: photorealistic-natural\nAsset type: prototype photo asset, landscape 16:9\nPrimary request: realistic candid photo from an audience seat at a Japanese developer lightning-talk event in the evening, projector screen with one slide, a few silhouetted audience heads foreground, warm dim venue lighting, slight phone-camera softness. Slide text exactly: title \"型で守るAPI設計\"; subtitle \"スキーマから始めるTypeScript\". Composition: landscape 16:9, centered screen, audience viewpoint, readable slide, no readable faces in focus. Constraints: no real company/project logos, no Rust/crab/GitHub/X/OpenAI logos, no watermark, no UI overlays, no extra slide text."
+  },
+  {
+    "generation_order": 4,
+    "file": "mock/public/assets/photos/lt3-rust-cli.jpg",
+    "source_path": "~/.codex/generated_images/01a11cab-8558-79c0-a8e8-eefbb58770ad/exec-ecbe8c1e-281a-4b65-9ce7-3b242856b1c2.png",
+    "prompt": "Use case: photorealistic-natural\nAsset type: prototype photo asset, landscape 16:9\nPrimary request: realistic candid photo from an audience seat at a Japanese developer lightning-talk event in the evening, projector screen with one slide, a few silhouetted audience heads foreground, warm dim venue lighting, slight phone-camera softness. Slide text exactly: title \"RustでつくるCLI\"; subtitle \"clap と cargo-dist で配布まで\". Composition: landscape 16:9, centered screen, audience viewpoint, readable slide, no readable faces in focus. Constraints: no real company/project logos, no Rust logo or crab mascot, no GitHub/X/OpenAI logos, no watermark, no UI overlays, no extra slide text."
+  },
+  {
+    "generation_order": 5,
+    "file": "mock/public/assets/photos/lt4-local-llm.jpg",
+    "source_path": "~/.codex/generated_images/01a11cab-8558-79c0-a8e8-eefbb58770ad/exec-03ca9683-7d60-472a-afa1-dd9830aa9592.png",
+    "prompt": "Use case: photorealistic-natural\nAsset type: prototype photo asset, landscape 16:9\nPrimary request: realistic candid photo from an audience seat at a Japanese developer lightning-talk event in the evening, projector screen with one slide, a few silhouetted audience heads foreground, warm dim venue lighting, slight phone-camera softness. A speaker holding a microphone may stand at the side, not in focus. Slide text exactly: title \"ローカルLLMで議事録\"; subtitle \"会議メモを手元で要約する\". Composition: landscape 16:9, centered screen with optional speaker at side, audience viewpoint, readable slide, no readable faces in focus. Constraints: no real company/project logos, no Rust/crab/GitHub/X/OpenAI logos, no watermark, no UI overlays, no extra slide text."
+  }
+]
