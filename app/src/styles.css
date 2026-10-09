@@ -130,6 +130,10 @@ button:disabled {
   font-weight: 600;
 }
 
+.header-action:disabled {
+  opacity: 0.4;
+}
+
 .app-header.is-sub {
   display: grid;
   grid-template-columns: 44px 1fr 44px;

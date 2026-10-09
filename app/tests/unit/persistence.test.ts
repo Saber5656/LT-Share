@@ -268,6 +268,53 @@ test("collectGarbage never deletes a blob held in memory or referenced by a draf
   assert.deepEqual(spy.deletedMedia, []);
 });
 
+test("flushing the state after 次の投稿へ without the new draft leaves no ghost draft on disk", async () => {
+  const factory = new IDBFactory();
+  const spy = spyRepo(createIndexedDbRepository(factory));
+  const persistence = new Persistence(spy.repo);
+  const before = stateOf({ media: media("m1"), body: "保存する本文" });
+  await persistence.flush(before);
+
+  // The pre-write done before the screen switches: old draft + app state, but not
+  // the still-empty draft that may yet be refused.
+  const upcoming = draftReducer(before, { type: "nextDraft", id: "d-new", now: 2000 });
+  assert.equal(upcoming.current.id, "d-new");
+  assert.deepEqual(await persistence.flush(upcoming, { omit: new Set(["d-new"]) }), { ok: true });
+
+  const stored = await spy.repo.load();
+  assert.deepEqual(stored.drafts.map((d) => d.id), ["d1"], "the speculative empty draft was not written");
+  assert.equal(stored.meta?.currentDraftId, "d-new");
+
+  // If the page is reloaded right now the user gets a fresh empty draft with the same tags.
+  const restored = restoreState(stored, 3000);
+  assert.ok(restored);
+  assert.equal(restored.history.length, 1);
+  assert.equal(restored.history[0]?.body, "保存する本文");
+  assert.equal(restored.current.body, "");
+  assert.deepEqual(restored.current.tags, ["#TechLTNight"]);
+
+  // Once the new draft really is the current one, a normal flush writes it.
+  await persistence.flush(upcoming);
+  assert.deepEqual((await spy.repo.load()).drafts.map((d) => d.id).sort(), ["d-new", "d1"]);
+});
+
+test("pointing the app state back at the current draft undoes a refused 次の投稿へ", async () => {
+  const spy = spyRepo(createIndexedDbRepository(new IDBFactory()));
+  const persistence = new Persistence(spy.repo);
+  const before = stateOf({ body: "まだ移らない" });
+  await persistence.flush(before);
+
+  const upcoming = draftReducer(before, { type: "nextDraft", id: "d-new", now: 2000 });
+  await persistence.flush(upcoming, { omit: new Set(["d-new"]) });
+  assert.equal((await spy.repo.load()).meta?.currentDraftId, "d-new");
+
+  // The move was refused after all: flush what is really on screen.
+  await persistence.flush(before);
+  const stored = await spy.repo.load();
+  assert.equal(stored.meta?.currentDraftId, "d1");
+  assert.deepEqual(stored.drafts.map((d) => d.id), ["d1"]);
+});
+
 test("a read-only persistence (second tab) loads what is stored but never writes", async () => {
   const factory = new IDBFactory();
   const writer = new Persistence(createIndexedDbRepository(factory));

@@ -16,6 +16,7 @@ import {
   draftReducer,
   nextDraftBlocker,
   type Draft,
+  type NextDraftBlocker,
   type DraftAction,
   type DraftState,
   type Media,
@@ -47,6 +48,8 @@ export type App = {
   setCaptureKind: (kind: MediaKind) => void;
   // True while a share sheet / download hand-off is being opened (NFR-01).
   saveBusy: boolean;
+  // The kind of the file being stored right now, or null. 次の投稿へ waits for it.
+  captureBusy: MediaKind | null;
   storageProblem: StorageProblem | null;
   retryStorage: () => Promise<void>;
   toast: ToastState | null;
@@ -104,6 +107,9 @@ export function useController({
   const [saveBusy, setSaveBusy] = useState(false);
   const saveBusyRef = useRef(false);
   const nextBusyRef = useRef(false);
+  // Set while a captured file is being stored (kind shown in the indicator).
+  const [captureBusy, setCaptureBusy] = useState<MediaKind | null>(null);
+  const captureBusyRef = useRef(false);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [storageProblem, setStorageProblem] = useState<StorageProblem | null>(initialProblem);
 
@@ -124,9 +130,12 @@ export function useController({
   /* ---------- on-device persistence (C-03, NFR-02) ---------- */
 
   const persist = useCallback(
-    async (snapshot: DraftState = stateRef.current): Promise<boolean> => {
+    async (
+      snapshot: DraftState = stateRef.current,
+      options: { omit?: ReadonlySet<string> } = {},
+    ): Promise<boolean> => {
       if (!persistence.available) return false;
-      const result = await persistence.flush(snapshot);
+      const result = await persistence.flush(snapshot, options);
       const ok = result.ok && persistence.unpersistedMediaIds.size === 0;
       setStorageProblem((prev) => (ok ? (prev?.kind === "write" ? null : prev) : { kind: "write" }));
       return ok;
@@ -187,7 +196,6 @@ export function useController({
 
   const captureFile = useCallback(
     async (file: File, fallbackKind: MediaKind) => {
-      const draftId = stateRef.current.current.id;
       const kind = kindOf(file, fallbackKind);
       const media: Media = {
         id: newId(),
@@ -198,20 +206,24 @@ export function useController({
         saveStatus: "unsaved",
       };
 
-      // Store the blob first; the draft only points at it once it is in the media store.
-      const stored = await persistence.putMedia(media.id, file);
-      if (!stored.persisted && persistence.available) setStorageProblem({ kind: "write" });
-      // After the first successful save, ask the browser to keep this site's storage (best effort, once).
-      if (stored.persisted) void requestPersistentStorage(navigator.storage, browserStorage());
+      // While the file is being stored, 次の投稿へ is blocked (goNext checks this), so
+      // the draft on screen cannot change underneath it and the capture is never lost.
+      captureBusyRef.current = true;
+      setCaptureBusy(kind);
+      try {
+        // Store the blob first; the draft only points at it once it is in the media store.
+        const stored = await persistence.putMedia(media.id, file);
+        if (!stored.persisted && persistence.available) setStorageProblem({ kind: "write" });
+        // After the first successful save, ask the browser to keep this site's storage (best effort, once).
+        if (stored.persisted) void requestPersistentStorage(navigator.storage, browserStorage());
 
-      const current = stateRef.current.current;
-      if (current.id !== draftId) {
-        // The user moved on while the file was being stored; never attach it to another draft.
-        persistence.queueMediaDelete(media.id);
-        return;
+        const current = stateRef.current.current;
+        if (current.media) persistence.queueMediaDelete(current.media.id);
+        dispatch({ type: "mediaCaptured", draftId: current.id, media });
+      } finally {
+        captureBusyRef.current = false;
+        setCaptureBusy(null);
       }
-      if (current.media) persistence.queueMediaDelete(current.media.id);
-      dispatch({ type: "mediaCaptured", draftId, media });
     },
     [persistence],
   );
@@ -269,42 +281,58 @@ export function useController({
 
   /* ---------- 次の投稿へ (FR-10) ---------- */
 
-  const goNext = useCallback(async () => {
-    if (nextBusyRef.current) return;
-    nextBusyRef.current = true;
-    try {
-      const current = stateRef.current.current;
-      const blocker = nextDraftBlocker(current);
-
+  // Says why 次の投稿へ was refused (and offers the fix where there is one).
+  const explainRefusal = useCallback(
+    (current: Draft, blocker: NextDraftBlocker) => {
       if (blocker === "empty") {
         showToast("まだ記録も投稿文もありません。入力してから次へ進めます");
         return;
       }
+      const noun = current.media ? mediaNoun(current.media.kind) : "記録";
+      document.getElementById("step-record")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (blocker === "media-confirming") {
+        showToast(`${noun}を端末に保存できたか、「記録」の下で確認してください`);
+        return;
+      }
+      const retry = blocker === "media-failed";
+      showToast(
+        retry
+          ? `${noun}を端末に保存できていません。もう一度保存してください`
+          : `${noun}がまだ端末に保存されていません。保存してから次へ進めます`,
+        { label: retry ? "再試行" : "端末に保存", run: () => void saveMedia(current.id) },
+      );
+    },
+    [saveMedia, showToast],
+  );
+
+  const goNext = useCallback(async () => {
+    if (nextBusyRef.current) return;
+    // A file that is still being stored must land in this draft first; moving on now
+    // would leave it without a home (NFR-02).
+    if (captureBusyRef.current) {
+      showToast("取り込み中です。終わってから次へ進めます");
+      return;
+    }
+    nextBusyRef.current = true;
+    try {
+      const current = stateRef.current.current;
+      const blocker = nextDraftBlocker(current);
       if (blocker) {
-        const noun = current.media ? mediaNoun(current.media.kind) : "記録";
-        document.getElementById("step-record")?.scrollIntoView({ behavior: "smooth", block: "center" });
-        if (blocker === "media-confirming") {
-          showToast(`${noun}を端末に保存できたか、「記録」の下で確認してください`);
-        } else {
-          const retry = blocker === "media-failed";
-          showToast(
-            retry
-              ? `${noun}を端末に保存できていません。もう一度保存してください`
-              : `${noun}がまだ端末に保存されていません。保存してから次へ進めます`,
-            { label: retry ? "再試行" : "端末に保存", run: () => void saveMedia(current.id) },
-          );
-        }
+        explainRefusal(current, blocker);
         return;
       }
 
       // FR-10: never move on (and never drop the draft from the screen) unless the
-      // result is safely stored on the device: the saved draft, the empty new one
-      // and the app state are written first, then the screen switches. Without any
-      // storage the app runs in memory only and says so, so there is nothing to wait for.
+      // result is safely stored on the device. The saved draft and the app state are
+      // written first, WITHOUT the new empty draft: if the move is refused after all,
+      // nothing speculative stays on disk, and a reload at this instant simply starts
+      // a fresh empty draft with the same hashtags. Without any storage the app runs
+      // in memory only and says so, so there is nothing to wait for.
       const action: DraftAction = { type: "nextDraft", now: Date.now(), id: createDraftId() };
       if (persistence.available) {
         await persistence.retryUnpersistedMedia();
-        const ok = await persist(draftReducer(stateRef.current, action));
+        const upcoming = draftReducer(stateRef.current, action);
+        const ok = await persist(upcoming, { omit: new Set([upcoming.current.id]) });
         if (!ok) {
           showToast("投稿案を端末内に保存できなかったため、次へ進めません。空き容量を確認して再試行してください", {
             label: "再試行",
@@ -314,13 +342,26 @@ export function useController({
         }
       }
 
+      // The screen may have changed while the write ran (a capture started, the text
+      // was cleared...). Decide against what is on screen now, not what was.
+      const latest = stateRef.current;
+      const latestBlocker = nextDraftBlocker(latest.current);
+      if (captureBusyRef.current || latestBlocker) {
+        // Refused after all: point the saved app state back at the draft on screen.
+        if (persistence.available) await persist(latest);
+        if (captureBusyRef.current) showToast("取り込み中です。終わってから次へ進めます");
+        else if (latestBlocker) explainRefusal(latest.current, latestBlocker);
+        return;
+      }
+
       dispatch(action);
       window.scrollTo({ top: 0 });
-      showToast(`${current.index}本目を保存しました。タグは引き継ぎます`);
+      // Only now that the move really happened.
+      showToast(`${latest.current.index}本目を保存しました。タグは引き継ぎます`);
     } finally {
       nextBusyRef.current = false;
     }
-  }, [persistence, persist, saveMedia, showToast]);
+  }, [persistence, persist, explainRefusal, showToast]);
 
   const goNextRef = useRef(goNext);
   useLayoutEffect(() => {
@@ -356,6 +397,7 @@ export function useController({
     captureKind,
     setCaptureKind,
     saveBusy,
+    captureBusy,
     storageProblem,
     retryStorage,
     toast,

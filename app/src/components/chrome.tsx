@@ -4,11 +4,11 @@ import { useApp } from "../app/context.ts";
 import { X_POST_LIMIT } from "../lib/draft.ts";
 
 export function ComposerHeader() {
-  const { goNext } = useApp();
+  const { goNext, captureBusy } = useApp();
   return (
     <header className="app-header">
       <h1 className="app-title">LT Share on X</h1>
-      <button type="button" className="header-action" onClick={() => void goNext()}>
+      <button type="button" className="header-action" disabled={captureBusy !== null} onClick={() => void goNext()}>
         次の投稿へ
         <CaretRightIcon size={18} weight="bold" aria-hidden="true" />
       </button>

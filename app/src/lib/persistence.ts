@@ -52,8 +52,13 @@ export class Persistence {
     return snapshot;
   }
 
-  flush(state: DraftState): Promise<FlushResult> {
-    const run = this.chain.then(() => this.write(state));
+  /**
+   * Writes what changed. `omit` lists draft ids that must NOT be written yet (the
+   * speculative empty draft of a 次の投稿へ that may still be refused); the app
+   * state is written regardless, and a reload simply starts a fresh empty draft.
+   */
+  flush(state: DraftState, options: { omit?: ReadonlySet<string> } = {}): Promise<FlushResult> {
+    const run = this.chain.then(() => this.write(state, options.omit ?? new Set()));
     this.chain = run;
     return run;
   }
@@ -148,14 +153,16 @@ export class Persistence {
     this.pendingMediaDeletes.add(id);
   }
 
-  private async write(state: DraftState): Promise<FlushResult> {
+  private async write(state: DraftState, omit: ReadonlySet<string>): Promise<FlushResult> {
     if (!this.repo || this.readOnly) {
       return { ok: false, error: new Error("On-device storage is not available for writing") };
     }
 
     const drafts = [state.current, ...state.history];
     const serialized = new Map(drafts.map((draft) => [draft.id, JSON.stringify(draft)] as const));
-    const changed = drafts.filter((draft) => this.written.get(draft.id) !== serialized.get(draft.id));
+    const changed = drafts.filter(
+      (draft) => !omit.has(draft.id) && this.written.get(draft.id) !== serialized.get(draft.id),
+    );
     const meta = metaOf(state);
     const metaJson = JSON.stringify(meta);
 

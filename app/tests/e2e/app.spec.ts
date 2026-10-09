@@ -57,6 +57,22 @@ async function pickPhoto(page: Page, file: string | { name: string; mimeType: st
   await page.getByTestId("pick-photo").setInputFiles(file);
 }
 
+// Keys of an object store in the app's IndexedDB (to check what is really on disk).
+const storedKeys = (page: Page, store: "drafts" | "media") =>
+  page.evaluate(
+    (store) =>
+      new Promise<string[]>((resolve, reject) => {
+        const open = indexedDB.open("lt-share");
+        open.onerror = () => reject(open.error);
+        open.onsuccess = () => {
+          const keys = open.result.transaction(store).objectStore(store).getAllKeys();
+          keys.onsuccess = () => resolve(keys.result.map(String));
+          keys.onerror = () => reject(keys.error);
+        };
+      }),
+    store,
+  );
+
 const bodyBox = (page: Page) => page.getByRole("textbox", { name: "投稿文", exact: true });
 const saveButton = (page: Page) => page.getByRole("button", { name: "端末に保存", exact: true });
 const notSavedYet = (page: Page) => page.getByText("まだ端末に保存されていません", { exact: true });
@@ -236,6 +252,9 @@ test("次の投稿へ refuses an empty draft and media that is not confirmed sav
   await next.click();
   await expect(page.getByText("まだ記録も投稿文もありません", { exact: false })).toBeVisible();
   await expect(page.getByText("2本目の投稿案")).toHaveCount(0);
+  // A refused move leaves no speculative second draft on disk.
+  await page.waitForTimeout(600);
+  expect(await storedKeys(page, "drafts")).toHaveLength(1);
 
   await pickPhoto(page);
   await bodyBox(page).fill("本文");
@@ -254,6 +273,70 @@ test("次の投稿へ refuses an empty draft and media that is not confirmed sav
   await page.getByRole("button", { name: "保存できた" }).click();
   await next.click();
   await expect(page.getByText("2本目の投稿案")).toBeVisible();
+});
+
+test("次の投稿へ waits while a capture is still being stored, and the capture is never lost", async ({ page }) => {
+  // Make storing a media blob slow: its transaction reports "complete" 1.5 s late.
+  await page.addInitScript(() => {
+    const original = Object.getOwnPropertyDescriptor(IDBTransaction.prototype, "oncomplete");
+    if (!original?.set) return;
+    Object.defineProperty(IDBTransaction.prototype, "oncomplete", {
+      configurable: true,
+      get: original.get,
+      set(this: IDBTransaction, handler: ((ev: Event) => void) | null) {
+        const names = Array.from(this.objectStoreNames);
+        const slow =
+          sessionStorage.getItem("slowMedia") === "1" &&
+          names.length === 1 &&
+          names[0] === "media" &&
+          this.mode === "readwrite";
+        original.set!.call(
+          this,
+          slow && handler
+            ? (event: Event) => {
+                setTimeout(() => handler.call(this, event), 1500);
+              }
+            : handler,
+        );
+      },
+    });
+  });
+  await open(page);
+  await bodyBox(page).fill("本文あり");
+  await page.waitForTimeout(400);
+  await page.evaluate(() => sessionStorage.setItem("slowMedia", "1"));
+
+  await pickPhoto(page);
+  const importing = page.getByText("写真を取り込んでいます");
+  await expect(importing).toBeVisible();
+  const next = page.getByRole("button", { name: "次の投稿へ" });
+  await expect(next).toBeDisabled();
+  await expect(page.getByRole("button", { name: "ポスト確認" })).toBeDisabled();
+  await expect(page.getByText("1本目の投稿案")).toBeVisible();
+  await expect(page.getByText("本目を保存しました", { exact: false })).toHaveCount(0);
+
+  // The capture lands in the draft that was on screen; nothing was thrown away.
+  await expect(page.getByRole("img", { name: "記録した写真" })).toBeVisible();
+  await expect(importing).toHaveCount(0);
+  await expect(next).toBeEnabled();
+  await expect(page.getByText("1本目の投稿案")).toBeVisible();
+  await page.evaluate(() => sessionStorage.removeItem("slowMedia"));
+
+  await saveButton(page).click();
+  await page.getByRole("button", { name: "保存できた" }).click();
+  await next.click();
+  await expect(page.getByText("1本目を保存しました", { exact: false })).toBeVisible();
+  await expect(page.getByText("2本目の投稿案")).toBeVisible();
+
+  // Exactly the saved draft and the new current one are on disk (no ghost), and the photo is kept.
+  await page.waitForTimeout(600);
+  expect(await storedKeys(page, "drafts")).toHaveLength(2);
+  expect(await storedKeys(page, "media")).toHaveLength(1);
+  await page.reload();
+  await page.getByRole("button", { name: /保存した投稿案 1/ }).click();
+  const thumb = page.getByTestId("draft-row").locator("img");
+  await expect(thumb).toBeVisible();
+  expect(await thumb.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
 });
 
 test("re-recording replaces the draft's media and removes the old blob only after it is stored", async ({ page }) => {

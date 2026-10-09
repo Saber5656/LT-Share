@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { CameraIcon, CaretRightIcon, PlusIcon, WarningCircleIcon, XIcon } from "@phosphor-icons/react";
+import {
+  ArrowsClockwiseIcon,
+  CameraIcon,
+  CaretRightIcon,
+  PlusIcon,
+  WarningCircleIcon,
+  XIcon,
+} from "@phosphor-icons/react";
 import { useApp } from "../app/context.ts";
 import { useMedia } from "../app/useMedia.ts";
 import { Footer, PostCounter, Step, ComposerHeader } from "../components/chrome.tsx";
@@ -56,9 +63,10 @@ export function Composer() {
 }
 
 function ComposerFooter() {
-  const { state, saveBusy, openPostSheet } = useApp();
+  const { state, saveBusy, captureBusy, openPostSheet } = useApp();
   const { current } = state;
-  const ready = current.body.trim().length > 0 && current.generation !== "generating" && !saveBusy;
+  const ready =
+    current.body.trim().length > 0 && current.generation !== "generating" && !saveBusy && captureBusy === null;
   return (
     <Footer>
       <button type="button" className="primary-button" disabled={!ready} onClick={() => openPostSheet(current.id)}>
@@ -172,11 +180,11 @@ function useRecordPicker() {
 }
 
 function RecordControls({ openPicker }: { openPicker: () => void }) {
-  const { captureKind, setCaptureKind, saveBusy } = useApp();
+  const { captureKind, setCaptureKind, saveBusy, captureBusy } = useApp();
 
   return (
     <div className="record-controls">
-      <button type="button" className="outline-button" onClick={openPicker} disabled={saveBusy}>
+      <button type="button" className="outline-button" onClick={openPicker} disabled={saveBusy || captureBusy !== null}>
         <CameraIcon size={20} aria-hidden="true" />
         記録する
       </button>
@@ -199,26 +207,39 @@ function RecordControls({ openPicker }: { openPicker: () => void }) {
 }
 
 function MediaBlock({ openPicker }: { openPicker: () => void }) {
-  const { state, persistence, captureKind, saveBusy, saveMedia, confirmSaved, saveAgain } = useApp();
+  const { state, persistence, captureKind, saveBusy, captureBusy, saveMedia, confirmSaved, saveAgain } = useApp();
   const draft = state.current;
   const media = draft.media;
   const view = useMedia(persistence, media?.id, { remember: true });
+  const importing =
+    captureBusy !== null ? (
+      <div className="save-box" aria-live="polite" role="status">
+        <p className="status-line">
+          <ArrowsClockwiseIcon size={20} className="spin" aria-hidden="true" />
+          {mediaNoun(captureBusy)}を取り込んでいます…
+        </p>
+      </div>
+    ) : null;
 
   if (!media) {
     return (
-      <button type="button" className="media-empty" onClick={openPicker} disabled={saveBusy}>
-        <CameraIcon size={28} aria-hidden="true" />
-        <span className="media-empty-title">LTのスライドや様子を記録</span>
-        <span className="media-empty-note">
-          {captureKind === "video" ? "動画" : "写真"}を撮ったら、「端末に保存」で写真アプリへ保存します
-        </span>
-      </button>
+      <>
+        <button type="button" className="media-empty" onClick={openPicker} disabled={saveBusy || captureBusy !== null}>
+          <CameraIcon size={28} aria-hidden="true" />
+          <span className="media-empty-title">LTのスライドや様子を記録</span>
+          <span className="media-empty-note">
+            {captureKind === "video" ? "動画" : "写真"}を撮ったら、「端末に保存」で写真アプリへ保存します
+          </span>
+        </button>
+        {importing}
+      </>
     );
   }
 
   return (
     <div className="media">
       <MediaFrame media={media} view={view} missingHint="「記録する」からもう一度選び直してください。" />
+      {importing}
       <DeviceSaveStatus
         media={media}
         busy={saveBusy}
