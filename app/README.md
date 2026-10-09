@@ -30,7 +30,7 @@ LT_E2E_PORT=4391 npm run test:e2e
 ### Hosting
 
 - The app is a static build: `npm run build` writes everything to `dist/`, and every asset URL is relative (`base: "./"` in `vite.config.ts`), so it does not depend on the URL it is served from.
-- `.openai/hosting.json` (`{"static": {"directory": "dist"}}`) tells OpenAI Sites to serve `dist` at the site root. The Site project id has to be added when the project is created. Nothing here has been deployed.
+- `.openai/hosting.json` tells OpenAI Sites to serve `dist` at the site root and holds the Site's `project_id`. The Site is published **privately** (owner only); Sites builds it from a copy of this directory with `npm ci` and `npm run build`.
 - **Check on a real device after publishing.** The following cannot be verified headlessly and must be tried on an iPhone (Safari) and an Android phone (Chrome), ideally also inside the X app's in-app browser: previews of photos and videos read back from the browser's storage (`blob:` URLs), the share sheet ("画像を保存" / "ビデオを保存" into the photo library), and the hand-off to the X app from "Xで開く" and "写真/動画付きで共有".
 
 ## How it behaves
