@@ -295,11 +295,41 @@ function ComposerFooter() {
 function ComposerBody() {
   const { state } = useApp();
   const flow = useFlow();
+  const keyboard = useKeyboard();
+  const contentRef = useRef<HTMLElement>(null);
   const { current, history } = state;
+
+  useLayoutEffect(() => {
+    const field = keyboard.focusedElement;
+    const scroll = contentRef.current?.closest<HTMLElement>(".mobile-scroll");
+    if (!keyboard.visible || !field || !scroll || !contentRef.current?.contains(field)) return;
+
+    const keepVisible = () => {
+      const viewport = scroll.getBoundingClientRect();
+      const scale = viewport.height / scroll.clientHeight;
+      if (!scale) return;
+      const footerHeight =
+        Number.parseFloat(getComputedStyle(scroll).getPropertyValue("--flow-footer-height")) || 0;
+      const top = viewport.top + 12 * scale;
+      const bottom = viewport.bottom - (footerHeight + 12) * scale;
+      const bounds = field.getBoundingClientRect();
+      const delta =
+        bounds.height > bottom - top || bounds.top < top
+          ? bounds.top - top
+          : Math.max(0, bounds.bottom - bottom);
+      scroll.scrollTop += delta / scale;
+    };
+
+    const observer = new ResizeObserver(keepVisible);
+    observer.observe(scroll);
+    observer.observe(field);
+    keepVisible();
+    return () => observer.disconnect();
+  }, [keyboard.visible, keyboard.focusedElement, current.id]);
 
   return (
     <MobileScroll key={current.id} className="app-screen">
-      <main className="screen composer">
+      <main ref={contentRef} className="screen composer">
         <div className="draft-meta">
           <span>{current.index}本目の投稿案</span>
           <button type="button" className="meta-link" onClick={() => flow.push(historyScreen)}>
