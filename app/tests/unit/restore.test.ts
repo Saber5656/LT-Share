@@ -56,7 +56,9 @@ test("a missing current draft is replaced by an empty one that carries the tags"
   assert.ok(state);
   assert.equal(state.history.length, 2);
   assert.equal(state.current.index, 3);
-  assert.equal(state.current.id, "d3");
+  // A fresh unique id: it can never collide with a draft another tab created.
+  assert.ok(!["d1", "d2"].includes(state.current.id));
+  assert.match(state.current.id, /^d-/);
   assert.equal(state.current.body, "");
   assert.equal(state.current.media, null);
   assert.deepEqual(state.current.tags, ["#B"]);
@@ -70,6 +72,23 @@ test("drafts without app state still restore (tags from the latest draft)", () =
   assert.equal(state.history.length, 1);
   assert.deepEqual(state.current.tags, ["#X"]);
   assert.equal(state.current.index, 2);
+});
+
+test("old counter-style ids and new unique ids restore side by side", () => {
+  const state = restoreState(
+    {
+      drafts: [draft("d2", 2), draft("d-3f2a9c1e-uuid", 3), draft("d1", 1)],
+      meta: { currentDraftId: "d-3f2a9c1e-uuid", tags: [], nextId: 3 },
+    },
+    5000,
+  );
+
+  assert.equal(state?.current.id, "d-3f2a9c1e-uuid");
+  assert.deepEqual(
+    state?.history.map((d) => d.id),
+    ["d1", "d2"],
+  );
+  assert.equal(state?.nextId, 3);
 });
 
 test("nextId never collides with a stored draft id", () => {

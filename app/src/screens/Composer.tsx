@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import { CameraIcon, CaretRightIcon, PlusIcon, WarningCircleIcon, XIcon } from "@phosphor-icons/react";
 import { useApp } from "../app/context.ts";
 import { useMedia } from "../app/useMedia.ts";
-import { Footer, PostCounter, Step, StorageBanner, ComposerHeader } from "../components/chrome.tsx";
+import { Footer, PostCounter, Step, ComposerHeader } from "../components/chrome.tsx";
 import { DeviceSaveStatus, MediaFrame, mediaNoun } from "../components/media.tsx";
 import { composeDraftPost, xWeightedLength, type MediaKind } from "../lib/draft.ts";
 
@@ -15,7 +15,6 @@ export function Composer() {
     <>
       <ComposerHeader />
       <main className="screen composer" key={current.id}>
-        <StorageBanner />
         <div className="draft-meta">
           <span>{current.index}本目の投稿案</span>
           <button type="button" className="meta-link" onClick={() => nav.push({ view: "history" })}>

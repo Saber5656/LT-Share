@@ -268,6 +268,36 @@ test("collectGarbage never deletes a blob held in memory or referenced by a draf
   assert.deepEqual(spy.deletedMedia, []);
 });
 
+test("a read-only persistence (second tab) loads what is stored but never writes", async () => {
+  const factory = new IDBFactory();
+  const writer = new Persistence(createIndexedDbRepository(factory));
+  await writer.putMedia("m1", new Blob(["bytes"]));
+  await writer.putMedia("orphan", new Blob(["orphan"]));
+  await writer.flush(stateOf({ media: media("m1") }));
+
+  const spy = spyRepo(createIndexedDbRepository(factory));
+  const readOnly = new Persistence(spy.repo, Date.now, { readOnly: true });
+  assert.equal(readOnly.available, false);
+
+  const snapshot = await readOnly.load();
+  assert.equal(snapshot.drafts.length, 1);
+  assert.equal(await (await readOnly.getMedia("m1"))?.text(), "bytes");
+
+  // Every kind of write is refused or ignored.
+  const result = await readOnly.flush(stateOf({ body: "別タブでの編集" }));
+  assert.equal(result.ok, false);
+  assert.equal((await readOnly.putMedia("m2", new Blob(["x"]))).persisted, false);
+  readOnly.queueMediaDelete("m1");
+  assert.equal(await readOnly.collectGarbage(snapshot), 0);
+  await readOnly.flush(stateOf());
+
+  assert.equal(spy.writes.length, 0);
+  assert.deepEqual(spy.deletedMedia, []);
+  assert.equal(await spy.repo.getMedia("m2"), null, "the blob was not written");
+  assert.ok(await spy.repo.getMedia("orphan"), "no cleanup in a read-only tab");
+  assert.equal((await spy.repo.load()).drafts[0]?.body, "本文");
+});
+
 test("a media write that fails stays available in memory and is reported", async () => {
   const spy = spyRepo(createIndexedDbRepository(new IDBFactory()));
   const persistence = new Persistence(spy.repo);

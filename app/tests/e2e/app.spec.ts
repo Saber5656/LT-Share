@@ -361,6 +361,37 @@ test("when the browser blocks on-device storage the app says so and keeps workin
   await expect(page.getByRole("dialog", { name: "ポスト確認" }).getByRole("link", { name: /Xで開く/ })).toBeVisible();
 });
 
+test("a second tab is read-only, writes nothing, and becomes editable once the first tab is closed", async ({
+  context,
+}) => {
+  const first = await context.newPage();
+  await open(first);
+  await bodyBox(first).fill("一つ目のタブ");
+  await first.waitForTimeout(600); // let the debounced write finish
+
+  const second = await context.newPage();
+  await open(second);
+  const banner = second.getByRole("alert").filter({ hasText: "別のタブで開いています。このタブでは編集できません。" });
+  await expect(banner).toBeVisible();
+  await expect(second.locator(".app-body")).toHaveAttribute("inert", "");
+  // It still shows what is saved, but offers nothing to change it with.
+  await expect(bodyBox(second)).toHaveValue("一つ目のタブ");
+
+  // The first tab is unaffected and keeps saving.
+  await bodyBox(first).fill("一つ目のタブ 更新");
+  await first.waitForTimeout(600);
+  await expect(first.getByRole("alert")).toHaveCount(0);
+
+  await first.close();
+  await banner.getByRole("button", { name: "再読込" }).click();
+  await expect(banner).toHaveCount(0);
+  await expect(bodyBox(second)).toHaveValue("一つ目のタブ 更新");
+  await bodyBox(second).fill("二つ目のタブで編集");
+  await second.waitForTimeout(600);
+  await second.reload();
+  await expect(bodyBox(second)).toHaveValue("二つ目のタブで編集");
+});
+
 test("a write failure (e.g. storage full) is shown without losing anything, and 次の投稿へ waits for a retry", async ({
   page,
 }) => {

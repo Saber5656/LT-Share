@@ -59,10 +59,22 @@ export type DraftAction =
   | { type: "setBody"; body: string }
   | { type: "setIncludeDeveloper"; value: boolean }
   | { type: "openedInX"; draftId: string }
-  | { type: "nextDraft"; now?: number };
+  // `id` should be a createDraftId(); the counter-based fallback exists for tests and old data.
+  | { type: "nextDraft"; now?: number; id?: string };
 
 export const X_POST_LIMIT = 280;
 export const DEVELOPER_LABEL = "開発者：";
+
+// Collision-safe draft id. Earlier versions used "d1", "d2", ...; those still restore
+// fine (restoreState only reads the number from ids of that exact shape).
+export function createDraftId(): string {
+  const random = globalThis.crypto;
+  const suffix =
+    typeof random?.randomUUID === "function"
+      ? random.randomUUID()
+      : Array.from({ length: 4 }, () => Math.random().toString(36).slice(2, 8).padEnd(6, "0")).join("");
+  return `d-${suffix}`;
+}
 
 export function createDraft({
   id,
@@ -91,7 +103,7 @@ export function createDraft({
 }
 
 export function createInitialState(tags: string[] = [], now = Date.now()): DraftState {
-  return { current: createDraft({ id: "d1", index: 1, tags, now }), history: [], nextId: 2 };
+  return { current: createDraft({ id: createDraftId(), index: 1, tags, now }), history: [], nextId: 2 };
 }
 
 /* ---------- hashtags (FR-01) ---------- */
@@ -275,7 +287,7 @@ export function draftReducer(state: DraftState, action: DraftAction): DraftState
     case "nextDraft": {
       if (!canMoveToNextDraft(state.current)) return state;
       const next = createDraft({
-        id: `d${state.nextId}`,
+        id: action.id ?? `d${state.nextId}`,
         index: state.current.index + 1,
         tags: state.current.tags,
         now: action.now,

@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useState } from "react";
 import { AppContext } from "./app/context.ts";
 import { useController, type StorageProblem } from "./app/controller.ts";
-import { Toast } from "./components/chrome.tsx";
+import { StorageBanner, Toast } from "./components/chrome.tsx";
 import { createInitialState, type DraftState } from "./lib/draft.ts";
 import { Persistence } from "./lib/persistence.ts";
 import { createIndexedDbRepository } from "./lib/repository.ts";
 import { restoreState } from "./lib/restore.ts";
 import { hasSeenWelcome } from "./lib/welcome.ts";
+import { acquireWriterLock } from "./lib/writerLock.ts";
 import { Composer } from "./screens/Composer.tsx";
 import { DraftDetail, History } from "./screens/History.tsx";
 import { PostSheet } from "./screens/PostSheet.tsx";
@@ -20,18 +21,33 @@ type Boot = {
 
 // Opens the on-device storage and restores the saved state (C-03, AT-15).
 // If the browser refuses (private mode, blocked storage) the app still works in
-// memory and says so; nothing is deleted.
+// memory and says so; nothing is deleted. Only one tab may write: a tab that does
+// not get the writer lock runs read-only (see lib/writerLock.ts).
 async function boot(): Promise<Boot> {
+  const lock = await acquireWriterLock();
+  const readOnly = lock === "denied";
   try {
-    const persistence = new Persistence(createIndexedDbRepository());
+    const persistence = new Persistence(createIndexedDbRepository(), Date.now, { readOnly });
     const snapshot = await persistence.load();
     // Blobs left behind by an interrupted capture are removed; one that a draft references never is.
     await persistence.collectGarbage(snapshot);
     const restored = restoreState(snapshot);
-    return { initial: restored ?? createInitialState(), persistence, problem: null };
+    return {
+      initial: restored ?? createInitialState(),
+      persistence,
+      problem: readOnly ? { kind: "readonly" } : null,
+    };
   } catch {
     return { initial: createInitialState(), persistence: new Persistence(null), problem: { kind: "unavailable" } };
   }
+}
+
+// One boot per page, even if React runs the effect twice (StrictMode): the writer
+// lock is held for the page's lifetime, so a second attempt would be denied.
+let booting: Promise<Boot> | null = null;
+function bootOnce(): Promise<Boot> {
+  booting ??= boot();
+  return booting;
 }
 
 export function App() {
@@ -39,7 +55,7 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
-    void boot().then((result) => {
+    void bootOnce().then((result) => {
       if (!cancelled) setReady(result);
     });
     return () => {
@@ -62,14 +78,20 @@ function Loaded({ boot: { initial, persistence, problem } }: { boot: Boot }) {
     window.scrollTo({ top: 0 });
   }, [screenKey]);
 
+  // Another tab holds the writer lock: show everything, change nothing.
+  const readOnly = app.storageProblem?.kind === "readonly";
+
   return (
     <AppContext.Provider value={app}>
       <div className="app">
-        {route.view === "composer" ? <Composer /> : null}
-        {route.view === "history" ? <History /> : null}
-        {route.view === "detail" ? <DraftDetail draftId={route.draftId} /> : null}
-        {route.view === "welcome" ? <Welcome /> : null}
-        <PostSheet />
+        <StorageBanner />
+        <div className="app-body" inert={readOnly}>
+          {route.view === "composer" ? <Composer /> : null}
+          {route.view === "history" ? <History /> : null}
+          {route.view === "detail" ? <DraftDetail draftId={route.draftId} /> : null}
+          {route.view === "welcome" ? <Welcome /> : null}
+          <PostSheet />
+        </div>
         <Toast />
       </div>
     </AppContext.Provider>

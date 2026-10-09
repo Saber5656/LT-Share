@@ -676,6 +676,23 @@ button:disabled {
   font-size: 13px;
 }
 
+/* Storage / read-only notices sit above every screen. The read-only one stays visible while scrolling. */
+.app-banner {
+  padding: calc(var(--lt-safe-top) + 8px) var(--lt-gutter) 4px;
+  background: #fff;
+  border-bottom: 1px solid var(--lt-line);
+}
+
+.app-banner.is-sticky {
+  position: sticky;
+  z-index: 30;
+  top: 0;
+}
+
+.app-banner .notice {
+  margin: 0 0 4px;
+}
+
 .notice {
   display: flex;
   gap: 8px;

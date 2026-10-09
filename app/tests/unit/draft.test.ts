@@ -5,6 +5,7 @@ import {
   canMoveToNextDraft,
   composePost,
   createDraft,
+  createDraftId,
   draftReducer,
   nextDraftBlocker,
   parseTags,
@@ -99,6 +100,21 @@ test("nextDraft saves the current draft and carries only the tags over", () => {
   assert.equal(next.current.media, null);
   assert.equal(next.current.includeDeveloper, false);
   assert.equal(next.nextId, 5);
+});
+
+test("nextDraft uses the id it is given, so two tabs can never mint the same draft id", () => {
+  const next = draftReducer(stateWithDraft(), { type: "nextDraft", id: "d-fixed", now: 2000 });
+  assert.equal(next.current.id, "d-fixed");
+  assert.equal(next.history[0]?.id, "d3");
+
+  // Without an id the counter-based id is kept (existing "d1"-style ids keep working).
+  assert.equal(draftReducer(stateWithDraft(), { type: "nextDraft" }).current.id, "d4");
+});
+
+test("createDraftId makes unique ids that the counter-based restore logic ignores", () => {
+  const ids = new Set(Array.from({ length: 200 }, () => createDraftId()));
+  assert.equal(ids.size, 200);
+  for (const id of ids) assert.match(id, /^d-[0-9a-z-]{8,}$/i);
 });
 
 test("changing tags after nextDraft does not rewrite saved drafts", () => {

@@ -12,6 +12,7 @@ import { getAiProvider } from "../lib/ai.ts";
 import { mediaToFile, saveToDevice, sharePostWithMedia } from "../lib/deviceShare.ts";
 import {
   composeDraftPost,
+  createDraftId,
   draftReducer,
   nextDraftBlocker,
   type Draft,
@@ -26,7 +27,13 @@ import { requestPersistentStorage } from "../lib/storagePersist.ts";
 import { browserStorage } from "../lib/welcome.ts";
 import { useNavigation, type Navigation } from "./useNavigation.ts";
 
-export type StorageProblem = { kind: "unavailable" } | { kind: "write" };
+export type StorageProblem =
+  // The browser refuses on-device storage (private mode, blocked): memory only.
+  | { kind: "unavailable" }
+  // Another tab of this app holds the writer lock: this tab is read-only.
+  | { kind: "readonly" }
+  // A write failed (for example storage full); retrying is offered.
+  | { kind: "write" };
 export type ToastAction = { label: string; run: () => void };
 export type ToastState = { id: number; message: string; action?: ToastAction };
 
@@ -294,7 +301,7 @@ export function useController({
       // result is safely stored on the device: the saved draft, the empty new one
       // and the app state are written first, then the screen switches. Without any
       // storage the app runs in memory only and says so, so there is nothing to wait for.
-      const action: DraftAction = { type: "nextDraft", now: Date.now() };
+      const action: DraftAction = { type: "nextDraft", now: Date.now(), id: createDraftId() };
       if (persistence.available) {
         await persistence.retryUnpersistedMedia();
         const ok = await persist(draftReducer(stateRef.current, action));

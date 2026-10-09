@@ -25,14 +25,21 @@ export class Persistence {
   private readonly pinned = new Set<string>();
   private readonly repo: Repository | null;
   private readonly now: () => number;
+  private readonly readOnly: boolean;
 
-  constructor(repo: Repository | null, now: () => number = Date.now) {
+  constructor(repo: Repository | null, now: () => number = Date.now, options: { readOnly?: boolean } = {}) {
     this.repo = repo;
     this.now = now;
+    this.readOnly = options.readOnly ?? false;
   }
 
+  /**
+   * True when this page may write to storage. False without storage, and also in
+   * read-only mode (another tab holds the writer lock): such a page can read but
+   * never writes, deletes or cleans up anything.
+   */
   get available(): boolean {
-    return this.repo !== null;
+    return this.repo !== null && !this.readOnly;
   }
 
   /** Reads what is stored and remembers it, so an unchanged reload writes nothing. */
@@ -53,7 +60,7 @@ export class Persistence {
 
   async putMedia(id: string, blob: Blob): Promise<{ persisted: boolean; error?: unknown }> {
     this.memory.set(id, blob);
-    if (!this.repo) return { persisted: false };
+    if (!this.repo || this.readOnly) return { persisted: false };
     this.pinned.add(id);
     try {
       await this.repo.putMedia(id, blob);
@@ -87,7 +94,7 @@ export class Persistence {
    * the cleanup. Returns how many blobs were deleted.
    */
   async collectGarbage(snapshot: StoredSnapshot): Promise<number> {
-    if (!this.repo) return 0;
+    if (!this.repo || this.readOnly) return 0;
     const referenced = new Set(snapshot.drafts.flatMap((draft) => (draft.media ? [draft.media.id] : [])));
     let deleted = 0;
     try {
@@ -142,7 +149,9 @@ export class Persistence {
   }
 
   private async write(state: DraftState): Promise<FlushResult> {
-    if (!this.repo) return { ok: false, error: new Error("On-device storage is not available") };
+    if (!this.repo || this.readOnly) {
+      return { ok: false, error: new Error("On-device storage is not available for writing") };
+    }
 
     const drafts = [state.current, ...state.history];
     const serialized = new Map(drafts.map((draft) => [draft.id, JSON.stringify(draft)] as const));

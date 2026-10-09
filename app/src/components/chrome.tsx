@@ -97,23 +97,32 @@ export function StorageBanner() {
   if (!storageProblem) return null;
 
   return (
-    <div className="notice is-error" role="alert">
-      <WarningCircleIcon size={20} weight="fill" aria-hidden="true" />
-      <div>
-        {storageProblem.kind === "unavailable" ? (
-          <p>
-            このブラウザでは端末内への保存を使えません（プライベートブラウズなど）。入力した内容と写真・動画は、このページを閉じると失われます。
-          </p>
-        ) : (
-          <>
+    <div className={`app-banner${storageProblem.kind === "readonly" ? " is-sticky" : ""}`}>
+      <div className="notice is-error" role="alert">
+        <WarningCircleIcon size={20} weight="fill" aria-hidden="true" />
+        <div>
+          {storageProblem.kind === "unavailable" ? (
             <p>
-              端末内（ブラウザ）に保存できませんでした。容量不足などが考えられます。操作は続けられますが、このページを閉じると失われる可能性があります。
+              このブラウザでは端末内への保存を使えません（プライベートブラウズなど）。入力した内容と写真・動画は、このページを閉じると失われます。
             </p>
-            <button type="button" className="inline-action" onClick={() => void retryStorage()}>
-              再試行
-            </button>
-          </>
-        )}
+          ) : storageProblem.kind === "readonly" ? (
+            <>
+              <p>別のタブで開いています。このタブでは編集できません。</p>
+              <button type="button" className="inline-action" onClick={() => window.location.reload()}>
+                再読込
+              </button>
+            </>
+          ) : (
+            <>
+              <p>
+                端末内（ブラウザ）に保存できませんでした。容量不足などが考えられます。操作は続けられますが、このページを閉じると失われる可能性があります。
+              </p>
+              <button type="button" className="inline-action" onClick={() => void retryStorage()}>
+                再試行
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

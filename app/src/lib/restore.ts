@@ -1,4 +1,4 @@
-import { createDraft, createInitialState, type Draft, type DraftState } from "./draft.ts";
+import { createDraft, createDraftId, createInitialState, type Draft, type DraftState } from "./draft.ts";
 import type { StoredSnapshot } from "./repository.ts";
 
 function numericId(id: string): number {
@@ -34,7 +34,7 @@ export function restoreState(snapshot: StoredSnapshot, now = Date.now()): DraftS
   // The current draft is missing: keep every stored draft and start an empty one
   // that carries the hashtags, so nothing stored is lost or overwritten.
   const tags = meta?.tags ?? drafts[drafts.length - 1]?.tags ?? [];
-  const current = createDraft({ id: `d${nextId}`, index: maxIndex + 1, tags, now });
+  const current = createDraft({ id: createDraftId(), index: maxIndex + 1, tags, now });
   nextId += 1;
   return { current, history: drafts, nextId };
 }
