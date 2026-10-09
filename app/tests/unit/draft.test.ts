@@ -72,6 +72,16 @@ test("xWeightedLength counts every URL as 23, like X does", () => {
   assert.equal(xWeightedLength("見て https://example.com/x"), 5 + 23);
 });
 
+test("xWeightedLength ends a URL at the first non-ASCII character", () => {
+  // Japanese text glued to a URL is counted normally (2 per character), not swallowed by the URL.
+  assert.equal(xWeightedLength("https://example.com/とても長い"), 23 + 5 * 2);
+  assert.equal(xWeightedLength("詳細はhttps://example.com/a。続き"), 3 * 2 + 23 + 1 * 2 + 2 * 2);
+  assert.equal(xWeightedLength("https://example.com　全角スペース"), 23 + 2 + 6 * 2);
+  // Plain "http" without "://" and a scheme with nothing after it are not URLs.
+  assert.equal(xWeightedLength("https://"), 8);
+  assert.equal(xWeightedLength("http only"), 9);
+});
+
 /* ---------- next draft ---------- */
 
 test("nextDraft saves the current draft and carries only the tags over", () => {

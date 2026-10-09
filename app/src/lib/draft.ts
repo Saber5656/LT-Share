@@ -148,7 +148,9 @@ const SINGLE_WEIGHT_RANGES: Array<[number, number]> = [
   [8242, 8247],
 ];
 const URL_WEIGHT = 23;
-const URL_PATTERN = /https?:\/\/[^\s　]+/gi;
+// A URL runs over ASCII characters only: text that follows it (Japanese, full-width
+// punctuation or spaces) is counted normally instead of being swallowed by the URL.
+const URL_PATTERN = /https?:\/\/[\x21-\x7e]+/gi;
 
 export function xWeightedLength(text: string): number {
   let length = 0;
