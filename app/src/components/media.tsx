@@ -92,9 +92,13 @@ export function DeviceSaveStatus({
   onSaveByDownload,
   onConfirm,
   onAgain,
+  ready = true,
 }: {
   media: Media;
   busy: boolean;
+  // False until the file is loaded: the buttons that open the share sheet stay disabled,
+  // so navigator.share() can always be called synchronously from the tap (iOS).
+  ready?: boolean;
   onSave?: () => void;
   onSaveByDownload?: () => void;
   onConfirm?: () => void;
@@ -136,7 +140,7 @@ export function DeviceSaveStatus({
             <button type="button" className="small-button is-primary" onClick={onConfirm}>
               保存できた
             </button>
-            <button type="button" className="small-button" onClick={onAgain}>
+            <button type="button" className="small-button" onClick={onAgain} disabled={!ready}>
               もう一度
             </button>
           </div>
@@ -157,11 +161,11 @@ export function DeviceSaveStatus({
         </p>
         {onSave ? (
           <div className="save-actions">
-            <button type="button" className="small-button is-primary" onClick={onSave}>
+            <button type="button" className="small-button is-primary" onClick={onSave} disabled={!ready}>
               再試行
             </button>
             {onSaveByDownload ? (
-              <button type="button" className="small-button" onClick={onSaveByDownload}>
+              <button type="button" className="small-button" onClick={onSaveByDownload} disabled={!ready}>
                 ダウンロードで保存
               </button>
             ) : null}
@@ -179,7 +183,7 @@ export function DeviceSaveStatus({
           まだ端末に保存されていません
         </p>
         {onSave ? (
-          <button type="button" className="small-button is-primary" onClick={onSave}>
+          <button type="button" className="small-button is-primary" onClick={onSave} disabled={!ready}>
             端末に保存
           </button>
         ) : null}

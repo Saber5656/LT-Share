@@ -100,6 +100,14 @@ function PostSheetBody({ draft }: { draft: Draft }) {
             <ArrowSquareOutIcon size={18} weight="bold" aria-hidden="true" />
           </a>
         )}
+        {media && view?.status === "loading" && typeof navigator.share === "function" ? (
+          // The file is still loading: the share button appears disabled so that tapping it
+          // always calls navigator.share() synchronously (iOS user activation).
+          <button type="button" className="secondary-button" disabled>
+            <ShareNetworkIcon size={18} weight="bold" aria-hidden="true" />
+            {noun}付きで共有
+          </button>
+        ) : null}
         {file && media && canShareFile ? (
           <button
             type="button"

@@ -3,11 +3,18 @@ import { expect, test, type Page } from "@playwright/test";
 const PHOTO = "tests/fixtures/lt-photo.jpg";
 const WELCOME_FLAG = "lt-share:welcome-seen";
 
-type ShareMode = "ok" | "abort" | "fail" | "none";
-type SharedCall = { text: string | null; files: Array<{ name: string; type: string; size: number }> };
+type ShareMode = "ok" | "abort" | "fail" | "hang" | "none";
+type SharedCall = {
+  text: string | null;
+  files: Array<{ name: string; type: string; size: number }>;
+  // Was navigator.share() called in the same task as the tap, while the tap's user activation was live?
+  sameTask: boolean;
+  activation: boolean | null;
+};
 
 // Headless Chromium has no share sheet. Stub navigator.share/canShare and record the calls.
-// "none" simulates a browser without file sharing (the download fallback).
+// "none" simulates a browser without file sharing (the download fallback); "hang" a
+// WebView whose share() never settles.
 async function stubShare(page: Page, mode: ShareMode) {
   await page.addInitScript((mode) => {
     const w = window as unknown as { __shared: unknown[] };
@@ -17,19 +24,34 @@ async function stubShare(page: Page, mode: ShareMode) {
       Object.defineProperty(navigator, "share", { value: undefined, configurable: true });
       return;
     }
+    let inClickTask = false;
+    document.addEventListener(
+      "click",
+      () => {
+        inClickTask = true;
+        setTimeout(() => {
+          inClickTask = false;
+        }, 0);
+      },
+      true,
+    );
     Object.defineProperty(navigator, "canShare", {
       configurable: true,
       value: (data?: ShareData) => Array.isArray(data?.files) && (data?.files?.length ?? 0) > 0,
     });
     Object.defineProperty(navigator, "share", {
       configurable: true,
-      value: async (data: ShareData) => {
-        if (mode === "abort") throw new DOMException("cancelled", "AbortError");
-        if (mode === "fail") throw new DOMException("denied", "NotAllowedError");
+      value: (data: ShareData) => {
         w.__shared.push({
           text: data.text ?? null,
           files: (data.files ?? []).map((f) => ({ name: f.name, type: f.type, size: f.size })),
+          sameTask: inClickTask,
+          activation: navigator.userActivation?.isActive ?? null,
         });
+        if (mode === "hang") return new Promise<void>(() => {});
+        if (mode === "abort") return Promise.reject(new DOMException("cancelled", "AbortError"));
+        if (mode === "fail") return Promise.reject(new DOMException("denied", "NotAllowedError"));
+        return Promise.resolve();
       },
     });
   }, mode);
@@ -228,6 +250,74 @@ test("without file sharing the file is downloaded, and still needs the user's co
   await page.getByRole("button", { name: "もう一度" }).click();
   // "もう一度" starts the save again and asks again afterwards.
   await expect(askLine(page)).toBeVisible();
+});
+
+test("the share sheet is requested inside the tap, and only once the file has been loaded", async ({ page }) => {
+  // Make reading a blob from storage slow, so the "file not loaded yet" window is visible.
+  await page.addInitScript(() => {
+    const original = Object.getOwnPropertyDescriptor(IDBRequest.prototype, "onsuccess");
+    if (!original?.set) return;
+    Object.defineProperty(IDBRequest.prototype, "onsuccess", {
+      configurable: true,
+      get: original.get,
+      set(this: IDBRequest, handler: ((ev: Event) => void) | null) {
+        const source = this.source as { name?: string } | null;
+        const slow = sessionStorage.getItem("slowRead") === "1" && source?.name === "media";
+        original.set!.call(
+          this,
+          slow && handler
+            ? (event: Event) => {
+                setTimeout(() => handler.call(this, event), 1200);
+              }
+            : handler,
+        );
+      },
+    });
+  });
+  await open(page);
+  await pickPhoto(page);
+  await page.waitForTimeout(600); // let the draft be written
+  await page.evaluate(() => sessionStorage.setItem("slowRead", "1"));
+  await page.reload();
+
+  // After a reload nothing is in memory: the button is disabled until the file is loaded.
+  const save = saveButton(page);
+  await expect(save).toBeDisabled();
+  await expect(save).toBeEnabled();
+  await save.click();
+
+  const [call] = await sharedCalls(page);
+  expect(call).toMatchObject({ sameTask: true, files: [{ name: "lt-photo.jpg" }] });
+  expect(call?.activation).toBe(true);
+});
+
+test("a share call that never settles does not leave the save stuck (page visible again)", async ({ page }) => {
+  await open(page, "hang");
+  await pickPhoto(page);
+  await saveButton(page).click();
+  await expect(page.getByText("共有画面を開いています")).toBeVisible();
+
+  // The user comes back to the page; the share promise never settled.
+  await page.evaluate(() => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+  });
+  await expect(askLine(page)).toBeVisible({ timeout: 5000 });
+  await page.getByRole("button", { name: "保存できた" }).click();
+  await expect(savedLine(page)).toBeVisible();
+});
+
+test("a share call that never settles is given up after a timeout", async ({ page }) => {
+  await page.clock.install();
+  await open(page, "hang");
+  await pickPhoto(page);
+  await saveButton(page).click();
+  await expect(page.getByText("共有画面を開いています")).toBeVisible();
+
+  await page.clock.fastForward(61_000);
+  await expect(askLine(page)).toBeVisible();
+  await expect(page.getByRole("button", { name: "もう一度" })).toBeEnabled();
+  await expect(savedLine(page)).toHaveCount(0);
 });
 
 test("a failing share shows a failure with retry and a download fallback", async ({ page }) => {

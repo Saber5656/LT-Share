@@ -243,6 +243,7 @@ function MediaBlock({ openPicker }: { openPicker: () => void }) {
       <DeviceSaveStatus
         media={media}
         busy={saveBusy}
+        ready={view?.status === "ready"}
         onSave={() => void saveMedia(draft.id)}
         onSaveByDownload={() => void saveMedia(draft.id, "download")}
         onConfirm={() => confirmSaved(draft.id, media.id)}

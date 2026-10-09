@@ -65,6 +65,17 @@ test("saveToDevice opens the share sheet when files can be shared", async () => 
   assert.equal(rec.downloads.length, 0);
 });
 
+test("the share sheet is requested synchronously, inside the caller's click handler (iOS user activation)", async () => {
+  const rec = setup({ canShare: true });
+  const saving = saveToDevice(photo, {}, rec.env);
+  assert.equal(rec.shareCalls.length, 1, "navigator.share must be called before any await");
+  await saving;
+
+  const sharing = sharePostWithMedia(photo, "本文", rec.env);
+  assert.equal(rec.shareCalls.length, 2, "navigator.share must be called before any await");
+  await sharing;
+});
+
 test("saveToDevice downloads when file sharing is unavailable", async () => {
   for (const options of [
     { canShare: false as const },

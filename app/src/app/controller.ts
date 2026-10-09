@@ -9,7 +9,7 @@ import {
   type Dispatch,
 } from "react";
 import { getAiProvider } from "../lib/ai.ts";
-import { mediaToFile, saveToDevice, sharePostWithMedia } from "../lib/deviceShare.ts";
+import { sharePostWithMedia } from "../lib/deviceShare.ts";
 import {
   composeDraftPost,
   createDraftId,
@@ -24,6 +24,7 @@ import {
 } from "../lib/draft.ts";
 import { runGeneration } from "../lib/generation.ts";
 import type { Persistence } from "../lib/persistence.ts";
+import { startDeviceSave } from "../lib/saveFlow.ts";
 import { requestPersistentStorage } from "../lib/storagePersist.ts";
 import { browserStorage } from "../lib/welcome.ts";
 import { useNavigation, type Navigation } from "./useNavigation.ts";
@@ -55,6 +56,7 @@ export type App = {
   toast: ToastState | null;
   showToast: (message: string, action?: ToastAction) => void;
   captureFile: (file: File, fallbackKind: MediaKind) => Promise<void>;
+  // Starts synchronously (call it straight from a click handler).
   saveMedia: (draftId: string, mode?: "auto" | "download") => Promise<void>;
   confirmSaved: (draftId: string, mediaId: string) => void;
   saveAgain: (draftId: string, mediaId: string) => Promise<void>;
@@ -230,34 +232,36 @@ export function useController({
 
   /* ---------- save to device (FR-03) ---------- */
 
+  // Not an async function on purpose: everything up to navigator.share() has to run
+  // synchronously inside the click handler (iOS user activation). The blob therefore
+  // comes from memory only; the buttons stay disabled until the media is loaded.
   const saveMedia = useCallback(
-    async (draftId: string, mode: "auto" | "download" = "auto") => {
-      if (saveBusyRef.current) return;
+    (draftId: string, mode: "auto" | "download" = "auto"): Promise<void> => {
+      if (saveBusyRef.current) return Promise.resolve();
       const media = findDraftIn(stateRef.current, draftId)?.media;
-      if (!media) return;
+      if (!media) return Promise.resolve();
 
-      // Prefer the blob that is already in memory so the share sheet is opened
-      // while the tap's user activation is still valid.
-      const blob =
-        persistence.peekMedia(media.id) ??
-        (await persistence.getMedia(media.id, { remember: true }).catch(() => null));
-      if (!blob) {
-        showToast(`${mediaNoun(media.kind)}を読み込めません。もう一度記録してください`);
-        return;
+      const started = startDeviceSave({ blob: persistence.peekMedia(media.id), media, mode });
+      if (started.status === "not-ready") {
+        showToast(`${mediaNoun(media.kind)}を読み込み中です。読み込みが終わってからもう一度押してください`);
+        return Promise.resolve();
       }
 
       saveBusyRef.current = true;
       setSaveBusy(true);
-      try {
-        const result = await saveToDevice(mediaToFile(blob, media), { mode });
-        // Cancelled: nothing changed. Otherwise the user still has to confirm.
-        if (result !== "cancelled") dispatch({ type: "saveHandedOff", draftId, mediaId: media.id });
-      } catch {
-        dispatch({ type: "saveFailed", draftId, mediaId: media.id });
-      } finally {
-        saveBusyRef.current = false;
-        setSaveBusy(false);
-      }
+      return started.outcome
+        .then(
+          (outcome) => {
+            // Cancelled: nothing changes. Otherwise (hand-off, or a share call that never
+            // came back) the user is asked to confirm; "saved" is never assumed.
+            if (outcome !== "cancelled") dispatch({ type: "saveHandedOff", draftId, mediaId: media.id });
+          },
+          () => dispatch({ type: "saveFailed", draftId, mediaId: media.id }),
+        )
+        .finally(() => {
+          saveBusyRef.current = false;
+          setSaveBusy(false);
+        });
     },
     [persistence, showToast],
   );
