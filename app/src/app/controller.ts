@@ -161,7 +161,7 @@ export function useController({
       const provider = getAiProvider();
       const draft = findDraftIn(stateRef.current, draftId);
       if (!provider || !draft?.media) return;
-      const image = await persistence.getMedia(draft.media.id);
+      const image = await persistence.getMedia(draft.media.id).catch(() => null);
       if (!image) return;
       await runGeneration({ provider, draftId, image, tags: draft.tags, dispatch });
     },
@@ -209,7 +209,9 @@ export function useController({
 
       // Prefer the blob that is already in memory so the share sheet is opened
       // while the tap's user activation is still valid.
-      const blob = persistence.peekMedia(media.id) ?? (await persistence.getMedia(media.id, { remember: true }));
+      const blob =
+        persistence.peekMedia(media.id) ??
+        (await persistence.getMedia(media.id, { remember: true }).catch(() => null));
       if (!blob) {
         showToast(`${mediaNoun(media.kind)}を読み込めません。もう一度記録してください`);
         return;

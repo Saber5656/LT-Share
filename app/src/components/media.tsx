@@ -24,6 +24,22 @@ export function MediaFrame({
   if (!view || view.status === "loading") {
     return <div className="media-frame is-placeholder" aria-busy="true" aria-label={`${noun}を読み込み中`} />;
   }
+  if (view.status === "error") {
+    return (
+      <div className="media-frame is-placeholder is-missing" role="alert">
+        <WarningCircleIcon size={22} weight="fill" aria-hidden="true" />
+        <p>{noun}を読み込めませんでした。一時的なエラーかもしれません。保存した{noun}は消えていません。</p>
+        <div className="save-actions">
+          <button type="button" className="small-button" onClick={view.retry}>
+            再試行
+          </button>
+          <button type="button" className="small-button" onClick={() => window.location.reload()}>
+            再読込
+          </button>
+        </div>
+      </div>
+    );
+  }
   if (view.status === "missing") {
     return (
       <div className="media-frame is-placeholder is-missing" role="alert">

@@ -82,17 +82,18 @@ export class Persistence {
     return this.memory.get(id);
   }
 
+  /**
+   * The stored blob, or null when it does not exist. A storage read error is NOT
+   * reported as "missing": it rejects, so callers can offer a retry instead of
+   * telling the user to record again.
+   */
   async getMedia(id: string, options: { remember?: boolean } = {}): Promise<Blob | null> {
     const inMemory = this.memory.get(id);
     if (inMemory) return inMemory;
     if (!this.repo) return null;
-    try {
-      const blob = await this.repo.getMedia(id);
-      if (blob && options.remember) this.memory.set(id, blob);
-      return blob;
-    } catch {
-      return null;
-    }
+    const blob = await this.repo.getMedia(id);
+    if (blob && options.remember) this.memory.set(id, blob);
+    return blob;
   }
 
   /** Schedules a blob for deletion once a successful write no longer references it. */

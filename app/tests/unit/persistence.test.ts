@@ -26,6 +26,7 @@ function spyRepo(inner: Repository) {
     deletedMedia: [] as string[],
     failWrites: 0,
     failMediaPut: false,
+    failMediaGet: false,
     repo: {
       load: () => inner.load(),
       async writeDrafts(drafts: Draft[], meta: AppMeta) {
@@ -40,7 +41,10 @@ function spyRepo(inner: Repository) {
         if (spy.failMediaPut) throw new DOMException("quota", "QuotaExceededError");
         return inner.putMedia(id, blob);
       },
-      getMedia: (id: string) => inner.getMedia(id),
+      async getMedia(id: string) {
+        if (spy.failMediaGet) throw new DOMException("read failed", "UnknownError");
+        return inner.getMedia(id);
+      },
       async deleteMedia(id: string) {
         spy.deletedMedia.push(id);
         return inner.deleteMedia(id);
@@ -147,6 +151,40 @@ test("media replaced by a re-recording is deleted only after the new draft is wr
   assert.deepEqual(spy.deletedMedia, ["old"]);
   assert.equal(await persistence.getMedia("old"), null);
   assert.ok(await persistence.getMedia("new"));
+});
+
+test("a missing blob is null, but a read error is reported instead of looking like a missing blob", async () => {
+  const spy = spyRepo(createIndexedDbRepository(new IDBFactory()));
+  const persistence = new Persistence(spy.repo);
+  await spy.repo.putMedia("m1", new Blob(["bytes"]));
+
+  assert.equal(await persistence.getMedia("unknown"), null);
+
+  spy.failMediaGet = true;
+  await assert.rejects(persistence.getMedia("m1"), { name: "UnknownError" });
+
+  // The blob was never touched by the failed read and is readable once the error clears.
+  spy.failMediaGet = false;
+  assert.equal(await (await persistence.getMedia("m1"))?.text(), "bytes");
+});
+
+test("a transient read error never leads to deleting a blob that a draft still references", async () => {
+  const spy = spyRepo(createIndexedDbRepository(new IDBFactory()));
+  const persistence = new Persistence(spy.repo);
+  await persistence.putMedia("m1", new Blob(["bytes"]));
+  const state = stateOf({ media: media("m1") });
+  await persistence.flush(state);
+
+  // After a reload nothing is in memory, so a read goes to storage and fails.
+  const reloaded = new Persistence(spy.repo);
+  reloaded.queueMediaDelete("m1"); // even a stale delete request is ignored while referenced
+  spy.failMediaGet = true;
+  await assert.rejects(reloaded.getMedia("m1"));
+  await reloaded.flush(state);
+
+  assert.deepEqual(spy.deletedMedia, []);
+  spy.failMediaGet = false;
+  assert.ok(await spy.repo.getMedia("m1"));
 });
 
 test("a media write that fails stays available in memory and is reported", async () => {

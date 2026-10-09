@@ -396,6 +396,34 @@ test("a write failure (e.g. storage full) is shown without losing anything, and 
   await expect(page.getByText("2本目の投稿案")).toBeVisible();
 });
 
+test("a storage read error offers a retry instead of telling the user to record again", async ({ page }) => {
+  await page.addInitScript(() => {
+    const get = IDBObjectStore.prototype.get;
+    IDBObjectStore.prototype.get = function (...args: Parameters<IDBObjectStore["get"]>) {
+      if (sessionStorage.getItem("failMediaRead") === "1" && this.name === "media") {
+        throw new DOMException("read failed", "UnknownError");
+      }
+      return get.apply(this, args);
+    };
+  });
+  await open(page);
+  await recordAndConfirm(page);
+  await page.waitForTimeout(600); // let the debounced write finish
+
+  await page.evaluate(() => sessionStorage.setItem("failMediaRead", "1"));
+  await page.reload();
+  const alert = page.getByRole("alert").filter({ hasText: "を読み込めませんでした" });
+  await expect(alert).toBeVisible();
+  await expect(alert).toContainText("保存した写真は消えていません");
+  await expect(page.getByText("選び直してください")).toHaveCount(0);
+  await expect(alert.getByRole("button", { name: "再読込" })).toBeVisible();
+
+  await page.evaluate(() => sessionStorage.removeItem("failMediaRead"));
+  await alert.getByRole("button", { name: "再試行" }).click();
+  await expect(page.getByRole("img", { name: "記録した写真" })).toBeVisible();
+  await expect(savedLine(page)).toBeVisible();
+});
+
 test("text and tags are restored after a reload without moving on", async ({ page }) => {
   await open(page);
   await addTag(page, "TechLTNight");
