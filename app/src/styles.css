@@ -949,6 +949,13 @@ button:disabled {
   overflow-wrap: anywhere;
 }
 
+/* Boot problems and the error screen */
+
+.screen.crash {
+  padding-top: calc(48px + var(--lt-safe-top));
+  padding-bottom: calc(var(--lt-safe-bottom) + 24px);
+}
+
 /* ---------- Welcome ---------- */
 
 .welcome {

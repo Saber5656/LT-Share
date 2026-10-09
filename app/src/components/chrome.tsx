@@ -105,6 +105,15 @@ export function StorageBanner() {
             <p>
               このブラウザでは端末内への保存を使えません（プライベートブラウズなど）。入力した内容と写真・動画は、このページを閉じると失われます。
             </p>
+          ) : storageProblem.kind === "skipped" ? (
+            <>
+              <p>
+                保存せずに使っています。入力した内容と写真・動画は、このページを閉じると失われます。保存済みの投稿案はこの画面には表示されません。
+              </p>
+              <button type="button" className="inline-action" onClick={() => window.location.reload()}>
+                再読込
+              </button>
+            </>
           ) : storageProblem.kind === "readonly" ? (
             <>
               <p>別のタブで開いています。このタブでは編集できません。</p>

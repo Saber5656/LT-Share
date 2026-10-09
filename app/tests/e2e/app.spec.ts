@@ -577,6 +577,80 @@ test("when the browser blocks on-device storage the app says so and keeps workin
   await expect(page.getByRole("dialog", { name: "ポスト確認" }).getByRole("link", { name: /Xで開く/ })).toBeVisible();
 });
 
+test("a storage that never answers offers 再読込 or continuing without saving", async ({ page }) => {
+  await page.clock.install();
+  // indexedDB.open() returns a request that never fires.
+  await page.addInitScript(() => {
+    indexedDB.open = () => ({}) as IDBOpenDBRequest;
+  });
+  await open(page);
+
+  const notice = page.getByRole("alert").filter({ hasText: "読み込みに時間がかかっています" });
+  await expect(notice).toHaveCount(0);
+  await page.clock.fastForward(5_500);
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText("削除されていません");
+  await expect(page.getByRole("button", { name: "再読込" })).toBeVisible();
+
+  await page.getByRole("button", { name: "保存せずに続ける" }).click();
+  await expect(page.getByText("1本目の投稿案")).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "保存せずに使っています" })).toBeVisible();
+  await bodyBox(page).fill("保存せずに入力できる");
+  await expect(bodyBox(page)).toHaveValue("保存せずに入力できる");
+});
+
+test("a rendering error shows a recoverable message, not a white screen, and deletes nothing", async ({ page }) => {
+  await open(page);
+  await bodyBox(page).fill("無事な投稿案");
+  await page.waitForTimeout(600); // let the debounced write finish
+
+  // A stored draft with a broken shape makes the saved-drafts list throw while rendering.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open("lt-share");
+        open.onsuccess = () => {
+          const tx = open.result.transaction("drafts", "readwrite");
+          tx.objectStore("drafts").put({
+            id: "d-broken",
+            index: 9,
+            createdAt: 1,
+            updatedAt: 1,
+            tags: null,
+            body: "壊れたデータ",
+            bodySource: "user",
+            media: null,
+            includeDeveloper: false,
+            generation: "idle",
+            openedInX: false,
+          });
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        };
+      }),
+  );
+  await page.reload();
+  await page.getByRole("button", { name: /保存した投稿案 1/ }).click();
+
+  const crash = page.getByRole("alert").filter({ hasText: "問題が発生しました" });
+  await expect(crash).toBeVisible();
+  await expect(crash).toContainText("削除されることはありません");
+  expect(await storedKeys(page, "drafts")).toContain("d-broken");
+
+  // "もう一度表示" boots again from storage and returns to the composer.
+  await page.getByRole("button", { name: "もう一度表示" }).click();
+  await expect(page.getByText("1本目の投稿案")).toBeVisible();
+  await expect(bodyBox(page)).toHaveValue("無事な投稿案");
+  await page.getByRole("button", { name: /保存した投稿案 1/ }).click();
+  await expect(crash).toBeVisible();
+
+  // Reloading must not reopen the screen that just crashed.
+  await page.getByRole("button", { name: "再読込" }).click();
+  await expect(page.getByText("1本目の投稿案")).toBeVisible();
+  await expect(bodyBox(page)).toHaveValue("無事な投稿案");
+  expect(await storedKeys(page, "drafts")).toContain("d-broken");
+});
+
 test("a second tab is read-only, writes nothing, and becomes editable once the first tab is closed", async ({
   context,
 }) => {

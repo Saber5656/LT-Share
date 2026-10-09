@@ -34,6 +34,8 @@ export type StorageProblem =
   | { kind: "unavailable" }
   // Another tab of this app holds the writer lock: this tab is read-only.
   | { kind: "readonly" }
+  // The user chose to continue without waiting for a slow storage: memory only.
+  | { kind: "skipped" }
   // A write failed (for example storage full); retrying is offered.
   | { kind: "write" };
 export type ToastAction = { label: string; run: () => void };
