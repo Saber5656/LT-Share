@@ -26,10 +26,11 @@ function setup(options: {
     downloads: [],
   };
   const nav: ShareEnv["navigator"] = {};
-  if (options.canShare !== "missing") {
+  const canShare = options.canShare ?? true;
+  if (canShare !== "missing") {
     nav.canShare = (data) => {
       rec.canShareCalls.push(data);
-      return options.canShare ?? true;
+      return canShare;
     };
   }
   if (options.share !== "missing") {
