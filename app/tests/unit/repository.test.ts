@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { IDBFactory } from "fake-indexeddb";
-import { createIndexedDbRepository } from "../../src/lib/repository.ts";
+import { createIndexedDbRepository, transactionDone } from "../../src/lib/repository.ts";
 import { createDraft, type Draft } from "../../src/lib/draft.ts";
 
 function draft(id: string, index: number, overrides: Partial<Draft> = {}): Draft {
@@ -63,6 +63,46 @@ test("media blobs are stored by id and can be deleted", async () => {
 
   await reloaded.deleteMedia("m1");
   assert.equal(await reloaded.getMedia("m1"), null);
+});
+
+type FakeTx = {
+  error: DOMException | null;
+  oncomplete: (() => void) | null;
+  onerror: ((event: Event) => void) | null;
+  onabort: ((event: Event) => void) | null;
+};
+
+function fakeTx(error: DOMException | null = null): FakeTx {
+  return { error, oncomplete: null, onerror: null, onabort: null };
+}
+
+test("transactionDone rejects with the transaction error when there is one", async () => {
+  const tx = fakeTx(new DOMException("full", "QuotaExceededError"));
+  const done = transactionDone(tx as unknown as IDBTransaction);
+  tx.onabort?.({ target: tx } as unknown as Event);
+  await assert.rejects(done, { name: "QuotaExceededError" });
+});
+
+test("transactionDone falls back to the failing request's error when tx.error is empty", async () => {
+  const tx = fakeTx(null);
+  const done = transactionDone(tx as unknown as IDBTransaction);
+  const requestError = new DOMException("constraint", "ConstraintError");
+  tx.onerror?.({ target: { error: requestError } } as unknown as Event);
+  await assert.rejects(done, { name: "ConstraintError" });
+});
+
+test("transactionDone never rejects with undefined", async () => {
+  const tx = fakeTx(null);
+  const done = transactionDone(tx as unknown as IDBTransaction);
+  tx.onabort?.({ target: null } as unknown as Event);
+  await assert.rejects(done, (error: unknown) => error instanceof Error && error.message.length > 0);
+});
+
+test("transactionDone resolves on complete", async () => {
+  const tx = fakeTx(null);
+  const done = transactionDone(tx as unknown as IDBTransaction);
+  tx.oncomplete?.();
+  await done;
 });
 
 test("an unavailable IndexedDB rejects instead of throwing synchronously", async () => {

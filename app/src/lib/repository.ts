@@ -41,11 +41,17 @@ function request<T>(req: IDBRequest<T>): Promise<T> {
 }
 
 // Writes are only durable once the transaction completes (quota errors surface here).
-function transactionDone(tx: IDBTransaction): Promise<void> {
+export function transactionDone(tx: IDBTransaction): Promise<void> {
+  // tx.error can still be null while the handler runs; the failing request carries
+  // the real reason then. Never reject with undefined.
+  const reason = (event: Event) =>
+    tx.error ??
+    (event.target as IDBRequest | null)?.error ??
+    new Error("The on-device storage transaction failed");
   return new Promise((resolve, reject) => {
     tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error ?? new DOMException("Transaction aborted", "AbortError"));
+    tx.onerror = (event) => reject(reason(event));
+    tx.onabort = (event) => reject(reason(event));
   });
 }
 
