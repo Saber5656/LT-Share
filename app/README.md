@@ -29,7 +29,9 @@ LT_E2E_PORT=4391 npm run test:e2e
 
 ### Hosting
 
-`.openai/hosting.json` points OpenAI Sites at `dist` as a static directory. The Site project id has to be added when the project is created. Nothing here has been deployed.
+- The app is a static build: `npm run build` writes everything to `dist/`, and every asset URL is relative (`base: "./"` in `vite.config.ts`), so it does not depend on the URL it is served from.
+- `.openai/hosting.json` (`{"static": {"directory": "dist"}}`) tells OpenAI Sites to serve `dist` at the site root. The Site project id has to be added when the project is created. Nothing here has been deployed.
+- **Check on a real device after publishing.** The following cannot be verified headlessly and must be tried on an iPhone (Safari) and an Android phone (Chrome), ideally also inside the X app's in-app browser: previews of photos and videos read back from the browser's storage (`blob:` URLs), the share sheet ("画像を保存" / "ビデオを保存" into the photo library), and the hand-off to the X app from "Xで開く" and "写真/動画付きで共有".
 
 ## How it behaves
 
@@ -40,7 +42,9 @@ LT_E2E_PORT=4391 npm run test:e2e
 - **ポスト確認 (FR-08/09):** shows the full text. "Xで開く" is a real `<a href="https://x.com/intent/post?text=...">` so a phone can hand it to the X app. "写真/動画付きで共有" uses the Web Share API with the file and the text when the browser supports it (the user picks X in the share sheet). Sharing is disabled over the X limit. The app never says "投稿済み": statuses are "Xで開いた" and "未確認".
 - **次の投稿へ (FR-10):** stores the draft, carries over only the hashtags and starts an empty draft. It refuses an empty draft, media that is not confirmed as saved, and a draft that could not be written to browser storage.
 - **Saved drafts (FR-11):** newest first, with thumbnail, status, excerpt and the hashtags used at the time. What was edited on X, or whether the post was published, is not reflected.
-- **Persistence (C-03, NFR-02):** IndexedDB stores drafts, media blobs and app state (current draft, hashtags). Everything is restored on reload. If the browser refuses to store data (private mode, quota), the app shows a non-destructive notice, keeps working in memory, and never deletes a draft before a write has succeeded. A replaced media file is deleted only after the draft that no longer references it has been written.
+- **Persistence (C-03, NFR-02):** IndexedDB stores drafts, media blobs and app state (current draft, hashtags). Everything is restored on reload. If the browser refuses to store data (private mode, quota), the app shows a non-destructive notice, keeps working in memory, and never deletes a draft before a write has succeeded. A replaced media file is deleted only after the draft that no longer references it has been written. On start, stored blobs that no draft references (an interrupted capture) are removed; a referenced one never is. Only the current draft's media is kept in memory. After the first media save the app asks the browser for persistent storage once (the answer is ignored).
+- **One writer at a time:** the first tab takes a Web Lock (`lt-share-writer`) and holds it. Any other tab shows "別のタブで開いています。このタブでは編集できません。" with 再読込, is inert, and never writes. Without Web Locks nothing is guarded. New drafts get `d-<uuid>` ids; old `d1`-style ids still restore.
+- **Failure handling:** a storage load that takes more than 5 seconds offers 再読込 or continuing without saving; a storage read error offers retry/reload instead of asking the user to record again; a share call that never settles is given up (page visible again, or after 60 seconds) and the user is asked to confirm; a rendering error shows a recoverable message instead of a white screen.
 - **First-run notice:** shown once (flag in `localStorage`) and reopenable from the saved-drafts screen.
 
 ## Code map
@@ -53,6 +57,9 @@ LT_E2E_PORT=4391 npm run test:e2e
 | `src/lib/repository.ts` | `Repository` interface and its IndexedDB implementation |
 | `src/lib/persistence.ts` | Write-on-change, media blob handling, failure reporting |
 | `src/lib/restore.ts` | Rebuilds the in-memory state from storage |
+| `src/lib/writerLock.ts` | Single-writer Web Lock |
+| `src/lib/saveFlow.ts`, `settle.ts` | The tap-synchronous "端末に保存" start and the escape for a share call that never settles |
+| `src/lib/storagePersist.ts` | One-time `navigator.storage.persist()` request |
 | `src/lib/ai.ts`, `generation.ts` | `AiProvider` interface (no provider wired) and the generation runner |
 | `src/app/` | Controller hook, context, in-app navigation (History API) |
 | `src/screens/`, `src/components/` | UI |
