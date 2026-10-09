@@ -14,7 +14,8 @@ export type FlushResult = { ok: true } | { ok: false; error: unknown };
  *   can still share the file) when IndexedDB refuses the write.
  */
 export class Persistence {
-  private readonly written = new Map<string, Draft>();
+  // JSON of each draft as last stored, to write only what changed.
+  private readonly written = new Map<string, string>();
   private lastMeta = "";
   private chain: Promise<unknown> = Promise.resolve();
   private readonly memory = new Map<string, Blob>();
@@ -32,15 +33,14 @@ export class Persistence {
     return this.repo !== null;
   }
 
-  load(): Promise<StoredSnapshot> {
-    if (!this.repo) return Promise.reject(new Error("On-device storage is not available"));
-    return this.repo.load();
-  }
-
-  /** Marks a state that was just restored as already stored (nothing to rewrite). */
-  markWritten(state: DraftState): void {
-    for (const draft of [state.current, ...state.history]) this.written.set(draft.id, draft);
-    this.lastMeta = JSON.stringify(metaOf(state));
+  /** Reads what is stored and remembers it, so an unchanged reload writes nothing. */
+  async load(): Promise<StoredSnapshot> {
+    if (!this.repo) throw new Error("On-device storage is not available");
+    const snapshot = await this.repo.load();
+    this.written.clear();
+    for (const draft of snapshot.drafts) this.written.set(draft.id, JSON.stringify(draft));
+    this.lastMeta = snapshot.meta ? JSON.stringify(snapshot.meta) : "";
+    return snapshot;
   }
 
   flush(state: DraftState): Promise<FlushResult> {
@@ -104,7 +104,8 @@ export class Persistence {
     if (!this.repo) return { ok: false, error: new Error("On-device storage is not available") };
 
     const drafts = [state.current, ...state.history];
-    const changed = drafts.filter((draft) => this.written.get(draft.id) !== draft);
+    const serialized = new Map(drafts.map((draft) => [draft.id, JSON.stringify(draft)] as const));
+    const changed = drafts.filter((draft) => this.written.get(draft.id) !== serialized.get(draft.id));
     const meta = metaOf(state);
     const metaJson = JSON.stringify(meta);
 
@@ -115,7 +116,7 @@ export class Persistence {
           changed.map((draft) => ({ ...draft, updatedAt: stamp })),
           meta,
         );
-        for (const draft of changed) this.written.set(draft.id, draft);
+        for (const draft of changed) this.written.set(draft.id, serialized.get(draft.id) ?? "");
         this.lastMeta = metaJson;
       }
     } catch (error) {

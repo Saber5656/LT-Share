@@ -169,7 +169,7 @@ test("without IndexedDB the app keeps working in memory and says it is not persi
   await assert.rejects(persistence.load());
 });
 
-test("markWritten adopts a restored state so a reload does not rewrite or re-stamp it", async () => {
+test("a reload does not rewrite or re-stamp what is already stored", async () => {
   const factory = new IDBFactory();
   const writer = new Persistence(createIndexedDbRepository(factory), () => 9000);
   await writer.flush(stateOf());
@@ -178,11 +178,29 @@ test("markWritten adopts a restored state so a reload does not rewrite or re-sta
   const persistence = new Persistence(spy.repo, () => 20_000);
   const restored = restoreState(await persistence.load(), 20_000);
   assert.ok(restored);
-  persistence.markWritten(restored);
 
   await persistence.flush(restored);
   assert.equal(spy.writes.length, 0);
   assert.equal((await spy.repo.load()).drafts[0]?.updatedAt, 9000);
+
+  // A real change after the reload is written (and stamped).
+  await persistence.flush({ ...restored, current: { ...restored.current, body: "直した" } });
+  assert.equal(spy.writes.length, 1);
+  assert.equal((await spy.repo.load()).drafts[0]?.updatedAt, 20_000);
+});
+
+test("a generation interrupted by the reload is persisted as failed", async () => {
+  const factory = new IDBFactory();
+  const writer = new Persistence(createIndexedDbRepository(factory));
+  await writer.flush(stateOf({ generation: "generating" }));
+
+  const spy = spyRepo(createIndexedDbRepository(factory));
+  const persistence = new Persistence(spy.repo);
+  const restored = restoreState(await persistence.load());
+  assert.ok(restored);
+  await persistence.flush(restored);
+
+  assert.equal((await spy.repo.load()).drafts[0]?.generation, "failed");
 });
 
 test("media that could not be written are remembered and retried", async () => {
