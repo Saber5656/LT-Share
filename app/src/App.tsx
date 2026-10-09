@@ -24,7 +24,10 @@ type Boot = {
 async function boot(): Promise<Boot> {
   try {
     const persistence = new Persistence(createIndexedDbRepository());
-    const restored = restoreState(await persistence.load());
+    const snapshot = await persistence.load();
+    // Blobs left behind by an interrupted capture are removed; one that a draft references never is.
+    await persistence.collectGarbage(snapshot);
+    const restored = restoreState(snapshot);
     return { initial: restored ?? createInitialState(), persistence, problem: null };
   } catch {
     return { initial: createInitialState(), persistence: new Persistence(null), problem: { kind: "unavailable" } };

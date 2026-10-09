@@ -22,6 +22,8 @@ import {
 } from "../lib/draft.ts";
 import { runGeneration } from "../lib/generation.ts";
 import type { Persistence } from "../lib/persistence.ts";
+import { requestPersistentStorage } from "../lib/storagePersist.ts";
+import { browserStorage } from "../lib/welcome.ts";
 import { useNavigation, type Navigation } from "./useNavigation.ts";
 
 export type StorageProblem = { kind: "unavailable" } | { kind: "write" };
@@ -148,6 +150,12 @@ export function useController({
     };
   }, [persist]);
 
+  // Only the current draft's media is kept in memory; the rest is read from storage on demand.
+  const currentMediaId = state.current.media?.id;
+  useEffect(() => {
+    persistence.retainMedia(currentMediaId ? [currentMediaId] : []);
+  }, [persistence, currentMediaId]);
+
   const retryStorage = useCallback(async () => {
     await persistence.retryUnpersistedMedia();
     const ok = await persist();
@@ -186,6 +194,8 @@ export function useController({
       // Store the blob first; the draft only points at it once it is in the media store.
       const stored = await persistence.putMedia(media.id, file);
       if (!stored.persisted && persistence.available) setStorageProblem({ kind: "write" });
+      // After the first successful save, ask the browser to keep this site's storage (best effort, once).
+      if (stored.persisted) void requestPersistentStorage(navigator.storage, browserStorage());
 
       const current = stateRef.current.current;
       if (current.id !== draftId) {

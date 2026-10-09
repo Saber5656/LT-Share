@@ -65,6 +65,18 @@ test("media blobs are stored by id and can be deleted", async () => {
   assert.equal(await reloaded.getMedia("m1"), null);
 });
 
+test("listMediaIds returns the ids of every stored blob", async () => {
+  const repo = createIndexedDbRepository(new IDBFactory());
+  assert.deepEqual(await repo.listMediaIds(), []);
+
+  await repo.putMedia("m1", new Blob(["1"]));
+  await repo.putMedia("m2", new Blob(["2"]));
+  assert.deepEqual((await repo.listMediaIds()).sort(), ["m1", "m2"]);
+
+  await repo.deleteMedia("m1");
+  assert.deepEqual(await repo.listMediaIds(), ["m2"]);
+});
+
 type FakeTx = {
   error: DOMException | null;
   oncomplete: (() => void) | null;

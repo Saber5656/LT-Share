@@ -21,6 +21,8 @@ export class Persistence {
   private readonly memory = new Map<string, Blob>();
   private readonly pendingMediaDeletes = new Set<string>();
   private readonly unpersisted = new Set<string>();
+  // Ids whose write is in progress: never released from memory meanwhile.
+  private readonly pinned = new Set<string>();
   private readonly repo: Repository | null;
   private readonly now: () => number;
 
@@ -52,6 +54,7 @@ export class Persistence {
   async putMedia(id: string, blob: Blob): Promise<{ persisted: boolean; error?: unknown }> {
     this.memory.set(id, blob);
     if (!this.repo) return { persisted: false };
+    this.pinned.add(id);
     try {
       await this.repo.putMedia(id, blob);
       this.unpersisted.delete(id);
@@ -59,7 +62,44 @@ export class Persistence {
     } catch (error) {
       this.unpersisted.add(id);
       return { persisted: false, error };
+    } finally {
+      this.pinned.delete(id);
     }
+  }
+
+  /**
+   * Keeps only the blobs that are needed right now (the current draft's media) in
+   * memory. Everything else can be read back from storage on demand. A blob that
+   * exists nowhere else (its write failed) or is being written is never released.
+   */
+  retainMedia(ids: Iterable<string>): void {
+    const keep = new Set(ids);
+    for (const id of [...this.memory.keys()]) {
+      if (keep.has(id) || this.unpersisted.has(id) || this.pinned.has(id)) continue;
+      this.memory.delete(id);
+    }
+  }
+
+  /**
+   * Deletes stored blobs that no draft references (left behind by an interrupted
+   * capture). Call once after a successful load. A blob referenced by any draft, or
+   * held in memory in this session, is never deleted; any storage error just stops
+   * the cleanup. Returns how many blobs were deleted.
+   */
+  async collectGarbage(snapshot: StoredSnapshot): Promise<number> {
+    if (!this.repo) return 0;
+    const referenced = new Set(snapshot.drafts.flatMap((draft) => (draft.media ? [draft.media.id] : [])));
+    let deleted = 0;
+    try {
+      for (const id of await this.repo.listMediaIds()) {
+        if (referenced.has(id) || this.memory.has(id) || this.pinned.has(id)) continue;
+        await this.repo.deleteMedia(id);
+        deleted += 1;
+      }
+    } catch {
+      // Leave the rest for the next start; an orphaned blob is harmless.
+    }
+    return deleted;
   }
 
   /** Blobs that live only in memory because the browser refused to store them. */

@@ -22,7 +22,9 @@ export interface Repository {
   /** Upserts the given drafts and the app state in a single transaction. */
   writeDrafts(drafts: Draft[], meta: AppMeta): Promise<void>;
   putMedia(id: string, blob: Blob): Promise<void>;
+  /** The blob, or null when none is stored under that id. Storage errors reject. */
   getMedia(id: string): Promise<Blob | null>;
+  listMediaIds(): Promise<string[]>;
   deleteMedia(id: string): Promise<void>;
 }
 
@@ -139,6 +141,12 @@ export function createIndexedDbRepository(factory: IDBFactory = indexedDB, name 
           | { blob: Blob }
           | undefined;
         return record?.blob ?? null;
+      }),
+
+    listMediaIds: () =>
+      withDb(async (db) => {
+        const keys = await request(db.transaction(MEDIA, "readonly").objectStore(MEDIA).getAllKeys());
+        return keys.map(String);
       }),
 
     deleteMedia: (id) =>

@@ -396,6 +396,61 @@ test("a write failure (e.g. storage full) is shown without losing anything, and 
   await expect(page.getByText("2本目の投稿案")).toBeVisible();
 });
 
+test("persistent storage is requested once; on start only orphaned blobs are cleaned up", async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __persistCalls: number };
+    w.__persistCalls = 0;
+    Object.defineProperty(navigator.storage, "persist", {
+      configurable: true,
+      value: async () => {
+        w.__persistCalls += 1;
+        return true;
+      },
+    });
+  });
+  await open(page);
+  await recordAndConfirm(page);
+  await pickPhoto(page, { name: "second.jpg", mimeType: "image/jpeg", buffer: Buffer.from("second-photo-bytes") });
+  await expect(notSavedYet(page)).toBeVisible();
+  expect(await page.evaluate(() => (window as unknown as { __persistCalls: number }).__persistCalls)).toBe(1);
+  await page.waitForTimeout(600); // let the debounced write finish
+
+  const mediaIds = () =>
+    page.evaluate(
+      () =>
+        new Promise<string[]>((resolve, reject) => {
+          const open = indexedDB.open("lt-share");
+          open.onerror = () => reject(open.error);
+          open.onsuccess = () => {
+            const keys = open.result.transaction("media").objectStore("media").getAllKeys();
+            keys.onsuccess = () => resolve(keys.result.map(String));
+            keys.onerror = () => reject(keys.error);
+          };
+        }),
+    );
+  const [referenced] = await mediaIds();
+  expect(await mediaIds()).toHaveLength(1);
+
+  // A blob that no draft references (e.g. an interrupted capture) is left in storage.
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve, reject) => {
+        const open = indexedDB.open("lt-share");
+        open.onsuccess = () => {
+          const tx = open.result.transaction("media", "readwrite");
+          tx.objectStore("media").put({ id: "orphan", blob: new Blob(["orphan"]) });
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        };
+      }),
+  );
+  expect(await mediaIds()).toHaveLength(2);
+
+  await page.reload();
+  await expect.poll(mediaIds).toEqual([referenced]);
+  await expect(page.getByRole("img", { name: "記録した写真" })).toBeVisible();
+});
+
 test("a storage read error offers a retry instead of telling the user to record again", async ({ page }) => {
   await page.addInitScript(() => {
     const get = IDBObjectStore.prototype.get;

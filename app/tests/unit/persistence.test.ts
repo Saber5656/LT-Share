@@ -45,6 +45,7 @@ function spyRepo(inner: Repository) {
         if (spy.failMediaGet) throw new DOMException("read failed", "UnknownError");
         return inner.getMedia(id);
       },
+      listMediaIds: () => inner.listMediaIds(),
       async deleteMedia(id: string) {
         spy.deletedMedia.push(id);
         return inner.deleteMedia(id);
@@ -185,6 +186,86 @@ test("a transient read error never leads to deleting a blob that a draft still r
   assert.deepEqual(spy.deletedMedia, []);
   spy.failMediaGet = false;
   assert.ok(await spy.repo.getMedia("m1"));
+});
+
+test("retainMedia releases blobs that are no longer needed in memory but keeps them in storage", async () => {
+  const spy = spyRepo(createIndexedDbRepository(new IDBFactory()));
+  const persistence = new Persistence(spy.repo);
+  for (const id of ["a", "b", "c"]) await persistence.putMedia(id, new Blob([id]));
+
+  persistence.retainMedia(["a"]);
+
+  assert.ok(persistence.peekMedia("a"));
+  assert.equal(persistence.peekMedia("b"), undefined);
+  assert.equal(persistence.peekMedia("c"), undefined);
+  // Released blobs are still stored and can be read back from storage.
+  assert.equal(await (await persistence.getMedia("b"))?.text(), "b");
+  assert.deepEqual(spy.deletedMedia, []);
+});
+
+test("retainMedia never releases a blob that only exists in memory", async () => {
+  const spy = spyRepo(createIndexedDbRepository(new IDBFactory()));
+  const persistence = new Persistence(spy.repo);
+  spy.failMediaPut = true;
+  await persistence.putMedia("unsaved", new Blob(["only here"]));
+
+  persistence.retainMedia([]);
+
+  assert.ok(persistence.peekMedia("unsaved"), "the user's only copy must survive");
+});
+
+test("collectGarbage deletes blobs that no draft references, and only those", async () => {
+  const factory = new IDBFactory();
+  const writer = new Persistence(createIndexedDbRepository(factory));
+  await writer.putMedia("kept", new Blob(["kept"]));
+  await writer.putMedia("orphan", new Blob(["orphan"]));
+  await writer.flush(stateOf({ media: media("kept") }));
+
+  const spy = spyRepo(createIndexedDbRepository(factory));
+  const persistence = new Persistence(spy.repo);
+  const snapshot = await persistence.load();
+  assert.equal(await persistence.collectGarbage(snapshot), 1);
+
+  assert.deepEqual(spy.deletedMedia, ["orphan"]);
+  assert.ok(await spy.repo.getMedia("kept"));
+  assert.equal(await spy.repo.getMedia("orphan"), null);
+});
+
+test("collectGarbage keeps everything when listing or deleting fails", async () => {
+  const factory = new IDBFactory();
+  const writer = new Persistence(createIndexedDbRepository(factory));
+  await writer.putMedia("orphan", new Blob(["orphan"]));
+  await writer.flush(stateOf());
+
+  const inner = createIndexedDbRepository(factory);
+  const failingList: Repository = {
+    ...inner,
+    listMediaIds: async () => {
+      throw new DOMException("list failed", "UnknownError");
+    },
+  };
+  const failing = new Persistence(failingList);
+  assert.equal(await failing.collectGarbage(await failing.load()), 0);
+  assert.ok(await inner.getMedia("orphan"));
+
+  const failingDelete: Repository = {
+    ...inner,
+    deleteMedia: async () => {
+      throw new DOMException("delete failed", "UnknownError");
+    },
+  };
+  const stuck = new Persistence(failingDelete);
+  assert.equal(await stuck.collectGarbage(await stuck.load()), 0);
+  assert.ok(await inner.getMedia("orphan"));
+});
+
+test("collectGarbage never deletes a blob held in memory or referenced by a draft", async () => {
+  const spy = spyRepo(createIndexedDbRepository(new IDBFactory()));
+  const persistence = new Persistence(spy.repo);
+  await persistence.putMedia("fresh", new Blob(["captured a moment ago"]));
+
+  assert.equal(await persistence.collectGarbage({ drafts: [], meta: null }), 0);
+  assert.deepEqual(spy.deletedMedia, []);
 });
 
 test("a media write that fails stays available in memory and is reported", async () => {
