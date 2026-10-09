@@ -184,3 +184,35 @@ test("markWritten adopts a restored state so a reload does not rewrite or re-sta
   assert.equal(spy.writes.length, 0);
   assert.equal((await spy.repo.load()).drafts[0]?.updatedAt, 9000);
 });
+
+test("media that could not be written are remembered and retried", async () => {
+  const spy = spyRepo(createIndexedDbRepository(new IDBFactory()));
+  const persistence = new Persistence(spy.repo);
+
+  spy.failMediaPut = true;
+  await persistence.putMedia("m1", new Blob(["bytes"]));
+  assert.deepEqual([...persistence.unpersistedMediaIds], ["m1"]);
+
+  // Still failing: stays unpersisted and the in-memory copy is kept.
+  assert.equal(await persistence.retryUnpersistedMedia(), false);
+  assert.deepEqual([...persistence.unpersistedMediaIds], ["m1"]);
+
+  spy.failMediaPut = false;
+  assert.equal(await persistence.retryUnpersistedMedia(), true);
+  assert.equal(persistence.unpersistedMediaIds.size, 0);
+  assert.equal(await (await spy.repo.getMedia("m1"))?.text(), "bytes");
+});
+
+test("peekMedia is synchronous for blobs held in memory; getMedia can remember a stored blob", async () => {
+  const factory = new IDBFactory();
+  await createIndexedDbRepository(factory).putMedia("m1", new Blob(["stored"]));
+
+  const persistence = new Persistence(createIndexedDbRepository(factory));
+  assert.equal(persistence.peekMedia("m1"), undefined);
+
+  await persistence.getMedia("m1"); // not remembered by default
+  assert.equal(persistence.peekMedia("m1"), undefined);
+
+  const blob = await persistence.getMedia("m1", { remember: true });
+  assert.equal(persistence.peekMedia("m1"), blob);
+});

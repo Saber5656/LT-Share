@@ -19,6 +19,7 @@ export class Persistence {
   private chain: Promise<unknown> = Promise.resolve();
   private readonly memory = new Map<string, Blob>();
   private readonly pendingMediaDeletes = new Set<string>();
+  private readonly unpersisted = new Set<string>();
   private readonly repo: Repository | null;
   private readonly now: () => number;
 
@@ -53,18 +54,42 @@ export class Persistence {
     if (!this.repo) return { persisted: false };
     try {
       await this.repo.putMedia(id, blob);
+      this.unpersisted.delete(id);
       return { persisted: true };
     } catch (error) {
+      this.unpersisted.add(id);
       return { persisted: false, error };
     }
   }
 
-  async getMedia(id: string): Promise<Blob | null> {
+  /** Blobs that live only in memory because the browser refused to store them. */
+  get unpersistedMediaIds(): ReadonlySet<string> {
+    return this.unpersisted;
+  }
+
+  /** Tries again to store every in-memory-only blob. True when none are left. */
+  async retryUnpersistedMedia(): Promise<boolean> {
+    for (const id of [...this.unpersisted]) {
+      const blob = this.memory.get(id);
+      if (blob) await this.putMedia(id, blob);
+      else this.unpersisted.delete(id);
+    }
+    return this.unpersisted.size === 0;
+  }
+
+  /** The blob if it is already in memory (usable inside a user-gesture handler). */
+  peekMedia(id: string): Blob | undefined {
+    return this.memory.get(id);
+  }
+
+  async getMedia(id: string, options: { remember?: boolean } = {}): Promise<Blob | null> {
     const inMemory = this.memory.get(id);
     if (inMemory) return inMemory;
     if (!this.repo) return null;
     try {
-      return await this.repo.getMedia(id);
+      const blob = await this.repo.getMedia(id);
+      if (blob && options.remember) this.memory.set(id, blob);
+      return blob;
     } catch {
       return null;
     }
@@ -110,6 +135,7 @@ export class Persistence {
       try {
         await this.repo.deleteMedia(id);
         this.pendingMediaDeletes.delete(id);
+        this.unpersisted.delete(id);
         this.memory.delete(id);
       } catch {
         // Keep it queued; an orphaned blob is harmless and is retried on the next flush.
