@@ -455,6 +455,49 @@ test("re-recording replaces the draft's media and removes the old blob only afte
   await expect.poll(mediaCount).toBe(1);
 });
 
+test("re-recording an unsaved photo asks inside the app (not window.confirm) and opens the picker from the tap", async ({
+  page,
+}) => {
+  let nativeDialogs = 0;
+  page.on("dialog", (dialog) => {
+    nativeDialogs += 1;
+    void dialog.dismiss();
+  });
+  await open(page);
+  await pickPhoto(page);
+  await expect(notSavedYet(page)).toBeVisible();
+
+  const record = page.getByRole("button", { name: "記録する" });
+  const dialog = page.getByRole("dialog", { name: "撮り直しますか？" });
+
+  // "やめる" keeps everything as it was.
+  await record.click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "やめる" }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.getByRole("img", { name: "記録した写真" })).toBeVisible();
+  await expect(notSavedYet(page)).toBeVisible();
+
+  // "撮り直す" opens the file picker directly from that tap (user activation), then replaces the photo.
+  await record.click();
+  const chooser = page.waitForEvent("filechooser");
+  await dialog.getByRole("button", { name: "撮り直す" }).click();
+  await (await chooser).setFiles({ name: "second.jpg", mimeType: "image/jpeg", buffer: Buffer.from("second-bytes") });
+  await expect(dialog).toHaveCount(0);
+  await expect(notSavedYet(page)).toBeVisible();
+  await expect.poll(() => storedKeys(page, "media")).toHaveLength(1); // the replaced blob is removed once the draft is written
+  expect(nativeDialogs).toBe(0);
+
+  // A photo that is already saved on the device needs no confirmation.
+  await saveButton(page).click();
+  await page.getByRole("button", { name: "保存できた" }).click();
+  const direct = page.waitForEvent("filechooser");
+  await record.click();
+  await direct;
+  await expect(dialog).toHaveCount(0);
+  expect(nativeDialogs).toBe(0);
+});
+
 test("a video is recorded through the video picker", async ({ page }) => {
   await open(page);
   await page.getByRole("radio", { name: "動画" }).click();

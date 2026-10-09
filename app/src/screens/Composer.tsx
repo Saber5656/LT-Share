@@ -9,7 +9,7 @@ import {
 } from "@phosphor-icons/react";
 import { useApp } from "../app/context.ts";
 import { useMedia } from "../app/useMedia.ts";
-import { Footer, PostCounter, Step, ComposerHeader } from "../components/chrome.tsx";
+import { Footer, PostCounter, Sheet, Step, ComposerHeader } from "../components/chrome.tsx";
 import { DeviceSaveStatus, MediaFrame, mediaNoun } from "../components/media.tsx";
 import { composeDraftPost, xWeightedLength, type MediaKind } from "../lib/draft.ts";
 
@@ -57,6 +57,7 @@ export function Composer() {
         />
       </main>
       {picker.inputs}
+      {picker.confirmDialog}
       <ComposerFooter />
     </>
   );
@@ -139,21 +140,47 @@ function useRecordPicker() {
   const { state, captureKind, captureFile } = useApp();
   const inputs = { photo: useRef<HTMLInputElement>(null), video: useRef<HTMLInputElement>(null) };
   const media = state.current.media;
+  const [confirming, setConfirming] = useState(false);
+
+  // The picker has to be opened straight from a tap (user activation), so both the
+  // direct path and the confirmation button call this synchronously.
+  const openFilePicker = () => inputs[captureKind].current?.click();
 
   const open = () => {
     // Re-recording replaces what the draft holds. If the old file never reached the
-    // device, make sure the user means it (NFR-02).
-    if (
-      media &&
-      media.saveStatus !== "saved" &&
-      !window.confirm(
-        `いまの${mediaNoun(media.kind)}はまだ端末に保存されていません。撮り直すと、アプリ内のこの記録は置き換わります（端末の写真アプリに保存済みのものは消えません）。続けますか？`,
-      )
-    ) {
+    // device, make sure the user means it (NFR-02). This is an in-app dialog, not
+    // window.confirm: in-app browsers (such as the X app's WebView) may suppress that.
+    if (media && media.saveStatus !== "saved") {
+      setConfirming(true);
       return;
     }
-    inputs[captureKind].current?.click();
+    openFilePicker();
   };
+
+  const confirmDialog = (
+    <Sheet
+      open={confirming}
+      onClose={() => setConfirming(false)}
+      title="撮り直しますか？"
+      description={`いまの${media ? mediaNoun(media.kind) : "記録"}はまだ端末に保存されていません。撮り直すと、アプリ内のこの記録は置き換わります（端末の写真アプリに保存済みのものは消えません）。`}
+    >
+      <div className="sheet-actions">
+        <button
+          type="button"
+          className="primary-button"
+          onClick={() => {
+            setConfirming(false);
+            openFilePicker();
+          }}
+        >
+          撮り直す
+        </button>
+        <button type="button" className="text-button" onClick={() => setConfirming(false)}>
+          やめる
+        </button>
+      </div>
+    </Sheet>
+  );
 
   const onPicked = (kind: MediaKind) => (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -176,7 +203,7 @@ function useRecordPicker() {
     />
   ));
 
-  return { open, inputs: hidden };
+  return { open, inputs: hidden, confirmDialog };
 }
 
 function RecordControls({ openPicker }: { openPicker: () => void }) {
