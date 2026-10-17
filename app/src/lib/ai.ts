@@ -1,6 +1,8 @@
-// AI post-text generation is NOT available in this version: the hosting
-// platform cannot use the visitor's own ChatGPT plan yet (decision pending, see
-// docs/requirements.md G-01). The rest of the app only talks to this interface,
+// AI post-text generation is not connected in this version. ChatGPT plan usage
+// exists, but the hosted LT Share integration and its approval/configuration
+// have not been established (see docs/verification.md G-01).
+// Sites sign-in alone does not establish inference permission.
+// The rest of the app only talks to this interface,
 // so a provider can be plugged in later by returning it from getAiProvider().
 // While getAiProvider() returns null the UI shows no AI controls or labels.
 
