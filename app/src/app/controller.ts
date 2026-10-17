@@ -388,7 +388,7 @@ export function useController({
         const result = await sharePostWithMedia(file, composeDraftPost(draft));
         if (result === "shared") showToast("共有しました。投稿が完了したかどうかはXでご確認ください");
       } catch {
-        showToast("共有できませんでした。「Xで開く」から本文だけ渡せます");
+        showToast("共有できませんでした。Xを開くリンクから本文だけ渡せます");
       }
     },
     [showToast],

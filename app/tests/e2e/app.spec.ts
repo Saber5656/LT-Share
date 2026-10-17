@@ -183,7 +183,7 @@ test("main flow: record, confirm the device save, post to X, move on, and surviv
   const popup = page.waitForEvent("popup");
   await xLink.click();
   await (await popup).close();
-  await expect(sheet.getByText("Xの投稿画面を開きました", { exact: false })).toBeVisible();
+  await expect(sheet.getByText("Xへの移動を開始しました", { exact: false })).toBeVisible();
   await expect(page.getByText("投稿済み")).toHaveCount(0);
   await sheet.getByRole("button", { name: "閉じる" }).click();
   await expect(sheet).toHaveCount(0);
@@ -208,7 +208,7 @@ test("main flow: record, confirm the device save, post to X, move on, and surviv
   const row = page.getByTestId("draft-row");
   await expect(row).toHaveCount(1);
   await expect(row).toContainText("1本目");
-  await expect(row).toContainText("Xで開いた");
+  await expect(row).toContainText("Xを開く操作済み");
   await expect(row).toContainText("RustでCLIを作るLT。");
   await expect(row).toContainText("#TechLTNight #Rust");
   const thumb = row.locator("img");
@@ -810,3 +810,75 @@ test("text and tags are restored after a reload without moving on", async ({ pag
   await expect(page.locator(".tag-chip")).toHaveText("#TechLTNight");
   await expect(bodyBox(page)).toHaveValue("リロードしても残る");
 });
+
+for (const mobile of [
+  { name: "iPhone", userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1", prefix: "twitter://post?message=" },
+  { name: "Android", userAgent: "Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36", prefix: "intent://post?message=" },
+]) {
+  test.describe(`${mobile.name} X app hand-off`, () => {
+    test.use({ userAgent: mobile.userAgent });
+    test("uses an app link from the tap and leaves explicit alternatives", async ({ page }) => {
+      await open(page);
+      const text = "AI開発のLT。\n#test & @example";
+      await bodyBox(page).fill(text);
+      await addTag(page, "#LT");
+      const expected = `${text}\n\n#LT`;
+      await page.getByRole("button", { name: "ポスト確認", exact: true }).click();
+      const sheet = page.getByRole("dialog", { name: "ポスト確認" });
+      const appLink = sheet.getByRole("link", { name: "Xアプリで開く", exact: true });
+      const href = await appLink.getAttribute("href");
+      expect(href).toContain(mobile.prefix + encodeURIComponent(expected));
+      await expect(appLink).toHaveAttribute("target", "_self");
+      await expect(sheet.getByRole("link", { name: "ブラウザ版で開く", exact: true })).toHaveAttribute("href", `https://x.com/intent/post?text=${encodeURIComponent(expected)}`);
+      await expect(sheet.getByRole("button", { name: "本文をコピー", exact: true })).toBeVisible();
+      await expect(sheet.getByText("Xの投稿画面を開きました", { exact: false })).toHaveCount(0);
+      await page.screenshot({ path: `test-results/${mobile.name}-handoff.png`, animations: "disabled" });
+      // Suppress only the browser's external-protocol navigation. React's real
+      // click handler still runs; no test claims that an OS app was launched.
+      await page.evaluate(() => document.addEventListener("click", (event) => {
+        const link = (event.target as Element | null)?.closest("a");
+        if (link && /^(twitter|intent):/.test(link.href)) event.preventDefault();
+      }));
+      await appLink.click();
+      await expect(sheet.getByText("Xへの移動を開始しました", { exact: false })).toBeVisible();
+      await expect(sheet.getByRole("button", { name: "本文をコピー", exact: true })).toBeEnabled();
+      await sheet.getByRole("button", { name: "閉じる", exact: true }).click();
+      await page.reload();
+      await expect(bodyBox(page)).toHaveValue(text);
+      await expect(page.locator(".tag-chip")).toHaveText("#LT");
+      await page.getByRole("button", { name: "次の投稿へ", exact: true }).click();
+      await page.getByRole("button", { name: /保存した投稿案 1/ }).click();
+      await expect(page.getByTestId("draft-row")).toContainText("Xを開く操作済み");
+    });
+  });
+}
+
+for (const allowed of [true, false]) {
+  test(`copy post text ${allowed ? "succeeds" : "reports denied permission without losing the draft"}`, async ({ page }) => {
+    await page.addInitScript((allowed) => {
+      Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
+        writeText: (text: string) => {
+          if (!allowed) return Promise.reject(new DOMException("denied", "NotAllowedError"));
+          (window as unknown as { __copied: string }).__copied = text;
+          return Promise.resolve();
+        },
+      }});
+    }, allowed);
+    await open(page);
+    await bodyBox(page).fill("コピーするLTの本文");
+    await addTag(page, "#テスト");
+    await page.getByRole("button", { name: "ポスト確認", exact: true }).click();
+    const sheet = page.getByRole("dialog", { name: "ポスト確認" });
+    await sheet.getByRole("button", { name: "本文をコピー", exact: true }).click();
+    if (allowed) {
+      await expect(page.getByText("本文をコピーしました", { exact: true })).toBeVisible();
+      expect(await page.evaluate(() => (window as unknown as { __copied: string }).__copied)).toBe("コピーするLTの本文\n\n#テスト");
+    } else {
+      await expect(page.getByText("コピーできませんでした。上の本文を長押ししてコピーしてください", { exact: true })).toBeVisible();
+      await expect(page.getByText("本文をコピーしました", { exact: true })).toHaveCount(0);
+    }
+    await sheet.getByRole("button", { name: "閉じる", exact: true }).click();
+    await expect(bodyBox(page)).toHaveValue("コピーするLTの本文");
+    await expect(page.getByText("投稿済み", { exact: true })).toHaveCount(0);
+  });
+}

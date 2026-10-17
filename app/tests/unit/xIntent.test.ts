@@ -1,6 +1,35 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildXIntentUrl, replaceLoneSurrogates } from "../../src/lib/xIntent.ts";
+import { buildXIntentUrl, buildXAppUrl, detectMobilePlatform, replaceLoneSurrogates } from "../../src/lib/xIntent.ts";
+
+test("iPhone/iPad links address the app composer without a web login page", () => {
+  const text = "日本語 & #LT\n開発者：@example";
+  const url = buildXAppUrl(text, "ios");
+  assert.equal(url, `twitter://post?message=${encodeURIComponent(text)}`);
+  assert.equal(new URL(url!).searchParams.get("message"), text);
+});
+
+test("Android intent pins X and keeps the full web fallback encoded", () => {
+  const text = "a#Intent;scheme=evil;&日本語\n#LT";
+  const url = buildXAppUrl(text, "android")!;
+  assert.ok(url.startsWith("intent://post?message=" + encodeURIComponent(text)));
+  assert.ok(url.endsWith("#Intent;scheme=twitter;package=com.twitter.android;S.browser_fallback_url=" + encodeURIComponent(buildXIntentUrl(text)) + ";end"));
+  assert.equal(url.split("#Intent;").length, 2, "post text cannot inject an intent directive");
+});
+
+test("desktop keeps the web composer; malformed text is safe in app links too", () => {
+  assert.equal(buildXAppUrl("hi", "web"), null);
+  assert.doesNotThrow(() => buildXAppUrl("a\ud83db", "ios"));
+  assert.equal(new URL(buildXAppUrl("a\ud83db", "ios")!).searchParams.get("message"), "a�b");
+});
+
+test("mobile detection includes iPad desktop mode without treating every Mac as iOS", () => {
+  assert.equal(detectMobilePlatform({ userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)" }), "ios");
+  assert.equal(detectMobilePlatform({ userAgent: "Mozilla/5.0 (Linux; Android 15) Chrome/130" }), "android");
+  assert.equal(detectMobilePlatform({ userAgent: "Mozilla/5.0 (Macintosh)", platform: "MacIntel", maxTouchPoints: 5 }), "ios");
+  assert.equal(detectMobilePlatform({ userAgent: "Mozilla/5.0 (Macintosh)", platform: "MacIntel", maxTouchPoints: 0 }), "web");
+  assert.equal(detectMobilePlatform({ userAgent: "unknown" }), "web");
+});
 
 test("buildXIntentUrl percent-encodes the whole composed text", () => {
   const text = "RustでCLIを作るLT。\n\n#TechLTNight #Rust\n\n開発者：";

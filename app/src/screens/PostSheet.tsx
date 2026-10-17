@@ -1,12 +1,12 @@
-import { useMemo, useRef } from "react";
-import { ArrowSquareOutIcon, ShareNetworkIcon } from "@phosphor-icons/react";
+import { useMemo, useRef, useState } from "react";
+import { ArrowSquareOutIcon, CopyIcon, ShareNetworkIcon } from "@phosphor-icons/react";
 import { useApp } from "../app/context.ts";
 import { useMedia } from "../app/useMedia.ts";
 import { PostCounter, Sheet } from "../components/chrome.tsx";
 import { mediaNoun } from "../components/media.tsx";
 import { canSharePostWithMedia, mediaToFile } from "../lib/deviceShare.ts";
 import { X_POST_LIMIT, composeDraftPost, xWeightedLength, type Draft } from "../lib/draft.ts";
-import { buildXIntentUrl } from "../lib/xIntent.ts";
+import { buildXAppUrl, buildXIntentUrl, detectMobilePlatform } from "../lib/xIntent.ts";
 
 // "ポスト確認" (FR-08, FR-09): shows exactly what is handed to X.
 export function PostSheet() {
@@ -35,6 +35,22 @@ function PostSheetBody({ draft }: { draft: Draft }) {
   const text = composeDraftPost(draft);
   const count = xWeightedLength(text);
   const over = count > X_POST_LIMIT;
+  const appUrl = buildXAppUrl(text, detectMobilePlatform(navigator));
+  const webUrl = buildXIntentUrl(text);
+  const openLabel = appUrl ? "Xアプリで開く" : "Xで開く";
+  const [copyBusy, setCopyBusy] = useState(false);
+  const copyText = async () => {
+    if (copyBusy) return;
+    setCopyBusy(true);
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast("本文をコピーしました");
+    } catch {
+      showToast("コピーできませんでした。上の本文を長押ししてコピーしてください");
+    } finally {
+      setCopyBusy(false);
+    }
+  };
   const media = draft.media;
   const view = useMedia(persistence, media?.id, { remember: false });
 
@@ -82,24 +98,40 @@ function PostSheetBody({ draft }: { draft: Draft }) {
       <div className="sheet-actions">
         {over ? (
           <button type="button" className="primary-button" disabled>
-            Xで開く
+            {openLabel}
             <ArrowSquareOutIcon size={18} weight="bold" aria-hidden="true" />
           </button>
         ) : (
           <a
             className="primary-button"
-            href={buildXIntentUrl(text)}
-            target="_blank"
+            href={appUrl ?? webUrl}
+            target={appUrl ? "_self" : "_blank"}
             rel="noopener noreferrer"
             onClick={() => {
               markOpenedInX(draft.id);
-              showToast("Xの投稿画面を開きます。投稿はXで行ってください");
+              showToast("Xへの移動を開始しました。投稿内容はXで確認してください");
             }}
           >
-            Xで開く
+            {openLabel}
             <ArrowSquareOutIcon size={18} weight="bold" aria-hidden="true" />
           </a>
         )}
+        {appUrl ? (
+          <>
+            <p className="hint is-center">アプリが開かない場合は、本文をコピーしてXに貼り付けるか、ブラウザ版をお使いください。</p>
+            {over ? (
+              <button type="button" className="secondary-button" disabled>ブラウザ版で開く</button>
+            ) : (
+              <a className="secondary-button" href={webUrl} target="_blank" rel="noopener noreferrer" onClick={() => markOpenedInX(draft.id)}>
+                ブラウザ版で開く
+              </a>
+            )}
+          </>
+        ) : null}
+        <button type="button" className="secondary-button" disabled={copyBusy} onClick={() => void copyText()}>
+          <CopyIcon size={18} aria-hidden="true" />
+          本文をコピー
+        </button>
         {media && view?.status === "loading" && typeof navigator.share === "function" ? (
           // The file is still loading: the share button appears disabled so that tapping it
           // always calls navigator.share() synchronously (iOS user activation).
@@ -125,7 +157,7 @@ function PostSheetBody({ draft }: { draft: Draft }) {
       </div>
 
       {draft.openedInX ? (
-        <p className="hint is-center">Xの投稿画面を開きました。投稿したかどうかは、このアプリでは分かりません。</p>
+        <p className="hint is-center">Xへの移動を開始しました。実際に開けたか、投稿したかどうかは、このアプリでは分かりません。</p>
       ) : null}
     </div>
   );

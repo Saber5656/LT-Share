@@ -202,6 +202,7 @@ button:disabled {
 .secondary-button {
   border: 1px solid #c9ced6;
   background: #fff;
+  color: var(--lt-ink);
 }
 
 .secondary-button:disabled {

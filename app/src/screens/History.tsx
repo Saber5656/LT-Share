@@ -91,7 +91,7 @@ export function DraftDetail({ draftId }: { draftId: string }) {
         <div className="detail-status">
           <DraftStatus draft={draft} aiEnabled={aiEnabled} />
           <span className="muted">
-            {draft.openedInX ? "Xの投稿画面を開きました。投稿したかどうかは記録しません。" : "まだXで確認していません。"}
+            {draft.openedInX ? "Xへの移動を開始した投稿案です。起動・投稿の成否は記録しません。" : "まだXで確認していません。"}
           </span>
         </div>
         {aiEnabled && draft.generation === "generating" ? (
