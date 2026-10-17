@@ -20,7 +20,7 @@ export function Welcome() {
   return (
     <>
       <main className="screen welcome">
-        <h1 className="welcome-title">LT Share on X</h1>
+        <h1 className="welcome-title">LT Share</h1>
         <p className="welcome-lead">LTを聞きながら、記録からXへの共有までを少ない操作で。</p>
         <ol className="welcome-steps">
           <li>
@@ -42,7 +42,7 @@ export function Welcome() {
             <li>写真・動画と投稿案は、この端末（ブラウザ）に保存します。ブラウザのデータを消すと失われます。</li>
             <li>端末の写真アプリ（ギャラリー）への保存は、記録のあとに「端末に保存」から行います。ブラウザが自動で保存することはできません。</li>
             <li>投稿はXの画面で、あなた自身が行います。「Xで開く」を押すと、投稿文がXに渡されます。</li>
-            <li>LT Share on X は、独自のサーバーやデータベースを持たない設計です。</li>
+            <li>LT Share は、独自のサーバーやデータベースを持たない設計です。</li>
           </ul>
         </section>
       </main>

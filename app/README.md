@@ -1,4 +1,4 @@
-# LT Share on X: web app (v1)
+# LT Share: web app (v1)
 
 A mobile-first web app for lightning-talk attendees: set the event hashtags once, record a photo or video of the talk, write the post, and hand it to X. The hashtags carry over to the next talk.
 

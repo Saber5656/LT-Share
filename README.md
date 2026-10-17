@@ -1,8 +1,8 @@
-# LT Share on X
+# LT Share
 
 Share each lightning talk to X in a few taps while you keep listening.
 
-LT Share on X is a mobile web app for attendees of developer lightning-talk events. Set the event hashtags once, record a photo or video of the talk, save it to your phone, write the post, and hand it off to X. The hashtags carry over to the next talk.
+LT Share is a mobile web app for attendees of developer lightning-talk events. Set the event hashtags once, record a photo or video of the talk, save it to your phone, write the post, and hand it off to X. The hashtags carry over to the next talk.
 
 > **Status:** v1 web app implemented in [`app/`](app/), tested in a headless browser and published **privately** (owner only) on OpenAI Sites. AI text generation is **not** included yet (see [G-01](docs/verification.md)). The camera, share sheet and X hand-off have not been verified on a real phone yet.
 

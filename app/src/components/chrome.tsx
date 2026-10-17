@@ -7,7 +7,7 @@ export function ComposerHeader() {
   const { goNext, captureBusy } = useApp();
   return (
     <header className="app-header">
-      <h1 className="app-title">LT Share on X</h1>
+      <h1 className="app-title">LT Share</h1>
       <button type="button" className="header-action" disabled={captureBusy !== null} onClick={() => void goNext()}>
         次の投稿へ
         <CaretRightIcon size={18} weight="bold" aria-hidden="true" />

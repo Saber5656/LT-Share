@@ -1,4 +1,4 @@
-// Draft state for LT Share on X. Pure logic only: no DOM, storage or network.
+// Draft state for LT Share. Pure logic only: no DOM, storage or network.
 // Ported from the approved screen mock (mock/src/lib/draft.ts) and extended with
 // the device-save confirmation flow (FR-03) and persistence-friendly fields (6.2).
 

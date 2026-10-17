@@ -27,7 +27,7 @@ export class ErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("LT Share on X: rendering error", error, info.componentStack);
+    console.error("LT Share: rendering error", error, info.componentStack);
   }
 
   render() {

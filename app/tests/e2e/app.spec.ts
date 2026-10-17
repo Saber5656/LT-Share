@@ -118,7 +118,7 @@ test("main flow: record, confirm the device save, post to X, move on, and surviv
   );
   await open(page);
 
-  await expect(page.getByRole("heading", { name: "LT Share on X", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "LT Share", level: 1, exact: true })).toBeVisible();
   await expect(page.getByText("1本目の投稿案")).toBeVisible();
   // AI generation is not available in this version: no AI wording anywhere on the composer.
   await expect(page.getByText(/ChatGPT|AIで生成/)).toHaveCount(0);
