@@ -1,8 +1,16 @@
 import './style.css';
 import {createBridge} from './bridge.js';
-import {newSession,nextDraft,applyResult,beginRequest,editBody,composePost,summaryPrompt,restoreSession,normalizeTags,xWeightedLength} from './model.js';
+import {newSession,nextDraft,applyResult,beginRequest,editBody,composePost,summaryPrompt,restoreSession,normalizeTags,xWeightedLength,parseMobileDraft,xIntentUrl} from './model.js';
 const $=id=>document.getElementById(id), bridge=createBridge();
+const standalone=window.parent===window;
 let session=restoreSession(window.openai?.widgetState?.privateContent?.session),fresh=true,busy=false,previewUrl=null;
+if(standalone){
+  const draft=parseMobileDraft(window.location.hash);
+  if(draft){session.current={...session.current,...draft,source:draft.body?'user':'empty'};fresh=false;}
+  else if(window.location.hash.startsWith('#draft='))$('feedback').textContent='下書きリンクを読み込めませんでした。元のチャットでリンクを開き直すか、本文を入力してください。';
+  $('photo-section').hidden=true;$('mobile-help').hidden=false;$('body-number').textContent='2';$('developer-number').textContent='3';
+  $('connection').textContent='スマホ用の投稿編集画面です。本文とタグを確認して「ポスト確認」へ進んでください。';
+}
 const feedback=text=>{$('feedback').textContent=text;};
 function persist(){
   try{window.openai?.setWidgetState?.({modelContent:{draftId:session.current.draftId,requestId:session.current.requestId,tags:session.current.tags,body:session.current.body},privateContent:{session},imageIds:session.current.fileId?[session.current.fileId]:[]});}catch{feedback('画面の状態を保持できません。必要な投稿案をファイルに保存してください。');}
@@ -31,6 +39,7 @@ bridge.subscribe((method,params)=>{
   if(method==='ui/notifications/host-context-changed' && ['dark','light'].includes(params?.theme))document.documentElement.dataset.theme=params.theme;
   if(method==='ui/notifications/tool-cancelled'){session.current.status='idle';session.current.requestId=null;sync();feedback('処理がキャンセルされました。本文やタグは残っています。');}
 });
+$('tags').addEventListener('input',()=>{session={...session,current:{...session.current,tags:normalizeTags($('tags').value)}};fresh=false;persist();});
 $('tags').addEventListener('change',()=>{session={...session,current:{...session.current,tags:normalizeTags($('tags').value)}};fresh=false;sync();});
 $('body').addEventListener('input',()=>{session=editBody(session,$('body').value);fresh=false;persist();$('length').textContent=Array.from(session.current.body).length+'文字';$('source').textContent='編集済み';$('confirm').disabled=!session.current.body.trim();$('next').disabled=busy||!session.current.body.trim();});
 $('developer').addEventListener('change',()=>{session.current.includeDeveloper=$('developer').checked;fresh=false;persist();});
@@ -54,10 +63,10 @@ $('generate').onclick=async()=>{
 $('release-wait').onclick=()=>{session.current.status='idle';session.current.requestId=null;feedback('待機を解除しました。会話の返答を確認してから、必要なら再依頼してください。');sync();};
 $('next').onclick=()=>{session=nextDraft(session);fresh=false;if(previewUrl)URL.revokeObjectURL(previewUrl);previewUrl=null;$('preview').hidden=true;feedback('前の投稿案をこの画面に残しました。ハッシュタグは引き継ぎました。');sync();};
 $('history-toggle').onclick=()=>{$('history').hidden=!$('history').hidden;};
-$('confirm').onclick=()=>{const text=composePost(session.current);$('post-text').value=text;const count=xWeightedLength(text);$('limit').textContent='X換算の目安 '+count+' / 280'+(count>280?'。本文かハッシュタグを短くしてください。':'。最終確認はXで行ってください。');$('open-x').disabled=count>280;$('post-status').textContent='';$('post').showModal();};
+$('confirm').onclick=()=>{const text=composePost(session.current);$('post-text').value=text;const count=xWeightedLength(text);$('limit').textContent='X換算の目安 '+count+' / 280'+(count>280?'。本文かハッシュタグを短くしてください。':'。最終確認はXで行ってください。');$('open-x').setAttribute('aria-disabled',String(count>280));if(count>280)$('open-x').removeAttribute('href');else $('open-x').href=xIntentUrl(text);$('post-status').textContent='';$('post').showModal();};
 $('close-post').onclick=()=>$('post').close();
 $('copy').onclick=async()=>{try{await navigator.clipboard.writeText($('post-text').value);$('post-status').textContent='本文をコピーしました。';}catch{$('post-text').focus();$('post-text').select();$('post-status').textContent='コピーを許可できませんでした。本文を選択して手動でコピーしてください。';}};
-$('open-x').onclick=async()=>{try{const url='https://x.com/intent/post?text='+encodeURIComponent($('post-text').value.toWellFormed());if(bridge.ready)await bridge.request('ui/open-link',{url});else window.open(url,'_blank','noopener,noreferrer');$('post-status').textContent='Xを開く操作を行いました。投稿はXで確認してください。';}catch{$('post-status').textContent='Xを開けませんでした。本文をコピーしてXに貼り付けてください。';}};
+$('open-x').onclick=async(event)=>{if($('open-x').getAttribute('aria-disabled')==='true'){event.preventDefault();return;}if(!bridge.ready){$('post-status').textContent='Xで本文を確認し、写真を添付して投稿してください。';return;}event.preventDefault();try{await bridge.request('ui/open-link',{url:$('open-x').href});$('post-status').textContent='Xを開く操作を行いました。投稿はXで確認してください。';}catch{$('post-status').textContent='Xを開けませんでした。本文をコピーしてXに貼り付けてください。';}};
 $('export').onclick=()=>{const blob=new Blob([JSON.stringify(session,null,2)],{type:'application/json'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='lt-share-drafts.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
 sync();
-bridge.connect().then(context=>{if(['light','dark'].includes(context?.hostContext?.theme))document.documentElement.dataset.theme=context.hostContext.theme;$('connection').textContent='ChatGPTの会話と接続しました。写真の送信後に要約を依頼できます。';sync();}).catch(()=>{$('connection').textContent='ChatGPTの会話内で開くと、本人のChatGPTに要約を依頼できます。ここでは本文の編集と確認ができます。';sync();});
+if(!standalone)bridge.connect().then(context=>{if(['light','dark'].includes(context?.hostContext?.theme))document.documentElement.dataset.theme=context.hostContext.theme;$('connection').textContent='ChatGPTの会話と接続しました。写真の送信後に要約を依頼できます。';sync();}).catch(()=>{$('connection').textContent='ChatGPTの会話との接続を確認できません。ここでは本文の編集と確認ができます。';sync();});

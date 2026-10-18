@@ -7,7 +7,7 @@ const post = (payload) => worker.fetch(new Request('https://example.test/mcp', {
 async function rpc(method, params, id = 1) { return (await post({jsonrpc:'2.0',id,method,params})).json(); }
 test('entry and health expose no user state', async () => {
  const home = await worker.fetch(new Request('https://example.test/'));
- assert.match(await home.text(), /ChatGPT/);
+ assert.equal(await home.text(), '<html><body>widget</body></html>');
  const health = await worker.fetch(new Request('https://example.test/health'));
  assert.deepEqual(await health.json(), {status:'ok'});
 });
@@ -34,10 +34,10 @@ test('drafts have unique UUIDs, defaults, no server state, and preserve correlat
  const open = async (args={}) => (await rpc('tools/call',{name:'open_lt_share',arguments:args})).result.structuredContent;
  const a=await open(), b=await open({tags:['技術']});
  assert.match(a.draftId,/^[0-9a-f-]{36}$/); assert.notEqual(a.draftId,b.draftId);
- assert.deepEqual(a,{draftId:a.draftId,body:'',tags:[],includeDeveloper:false,requestId:null});
+ assert.ok(a.editorUrl);const {editorUrl:openUrl,...opened}=a;assert.deepEqual(opened,{draftId:a.draftId,body:'',tags:[],includeDeveloper:false,requestId:null});
  const args={draftId:b.draftId,requestId:'req-1',body:'写真に発表スライドが見えます。',tags:b.tags,includeDeveloper:true};
  const rendered=(await rpc('tools/call',{name:'render_lt_post',arguments:args})).result;
- assert.deepEqual(rendered.structuredContent,{...args,kind:'lt-post'});
+ const {editorUrl,...data}=rendered.structuredContent;assert.ok(editorUrl);assert.deepEqual(data,{...args,kind:'lt-post'});
  assert.ok(rendered.content.some(item=>item.type==='text' && item.text.includes(args.body) && args.tags.every(tag=>item.text.includes(tag))));
 });
 test('resource listing and reading return the injected HTML and restricted CSP', async () => {
@@ -77,7 +77,7 @@ test('render accepts boundary values and supplies optional defaults without requ
  const args={draftId:'d'.repeat(128),body:'文'.repeat(2000),tags:Array(12).fill('t'.repeat(80))};
  const result=await rpc('tools/call',{name:'render_lt_post',arguments:args},'correlation');
  assert.equal(result.id,'correlation');
- assert.deepEqual(result.result.structuredContent,{...args,kind:'lt-post',requestId:null,includeDeveloper:false});
+ const {editorUrl,...data}=result.result.structuredContent;assert.ok(editorUrl);assert.deepEqual(data,{...args,kind:'lt-post',requestId:null,includeDeveloper:false});
  for (const extra of [{draftId:'d'.repeat(129)},{requestId:'r'.repeat(129)},{tags:['']},{unexpected:true}]) {
  assert.equal((await rpc('tools/call',{name:'render_lt_post',arguments:{...args,...extra}})).result.isError,true);
  }
