@@ -1,0 +1,12 @@
+import {build} from 'vite';
+import {readFile,writeFile,mkdir,rm} from 'node:fs/promises';
+import {resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
+process.chdir(fileURLToPath(new URL('..',import.meta.url)));
+await build({root:'web',configFile:false,logLevel:'warn',build:{outDir:resolve('web-dist'),emptyOutDir:true,cssCodeSplit:false,rollupOptions:{output:{entryFileNames:'app.js',assetFileNames:'[name][extname]',codeSplitting:false}}}});
+let html=await readFile('web-dist/index.html','utf8');const js=await readFile('web-dist/app.js','utf8'),css=await readFile('web-dist/style.css','utf8');
+html=html.replace(/<script[^>]+src="[^"]+"[^>]*><\/script>/,()=>'<script type="module">'+js.replace(/<\/script/gi,'<\\/script')+'</script>').replace(/<link[^>]+rel="stylesheet"[^>]*>/,()=>'<style>'+css+'</style>');
+const server=await readFile('server/mcp.js','utf8');const worker=server+'\nexport default createWorker('+JSON.stringify(html)+');\n';
+await rm('dist',{recursive:true,force:true});await mkdir('dist/server',{recursive:true});await mkdir('dist/.openai',{recursive:true});await mkdir('worker',{recursive:true});
+await writeFile('worker/index.js',worker);await writeFile('dist/server/index.js',worker);await writeFile('dist/.openai/hosting.json',await readFile('.openai/hosting.json'));await writeFile('web-dist/widget.html',html);
+console.log('Built self-contained MCP worker and widget');

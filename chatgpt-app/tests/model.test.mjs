@@ -1,0 +1,10 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { newSession, nextDraft, applyResult, beginRequest, editBody, composePost, summaryPrompt, restoreSession } from '../web/model.js';
+test('next retains tags and archives an immutable old draft',()=>{const s=newSession('a');s.current.tags=['dev'];s.current.body='before';const n=nextDraft(s,'b');n.current.tags.push('new');assert.deepEqual(n.history[0].tags,['dev']);assert.equal(n.current.body,'');assert.equal(n.current.includeDeveloper,false);});
+test('late result targets old draft and never replaces user edits',()=>{let s=beginRequest(newSession('a'),'r');s=nextDraft(s,'b');s=applyResult(s,{draftId:'a',requestId:'r',body:'AI',tags:[]});assert.equal(s.history[0].body,'AI');assert.equal(s.current.body,'');s=beginRequest(s,'q');s=editBody(s,'edited');s=applyResult(s,{draftId:'b',requestId:'q',body:'overwrite'});assert.equal(s.current.body,'edited');});
+test('wrong correlation and duplicate response ignored',()=>{let s=beginRequest(newSession('a'),'r');assert.equal(applyResult(s,{draftId:'a',requestId:'x',body:'bad'}),s);s=applyResult(s,{draftId:'a',requestId:'r',body:'good'});assert.equal(applyResult(s,{draftId:'a',requestId:'r',body:'bad'}),s);});
+test('post text includes developer only when on, tags snapshot',()=>{let d=newSession('a').current;d.body='発表';d.tags=['dev','LT'];assert.equal(composePost(d),'発表\n\n#dev #LT');d.includeDeveloper=true;assert.equal(composePost(d),'発表\n\n#dev #LT\n\n開発者：');});
+test('prompt asks actual host model with exact correlation, no fake summary',()=>{const s=beginRequest(newSession('a'),'r');const p=summaryPrompt(s);assert.match(p,/render_lt_post/);assert.match(p,/100/);assert.match(p,/"requestId":"r"/);assert.match(p,/推測/);});
+test('untrusted saved state cannot inject malformed drafts',()=>{assert.equal(restoreSession({current:{body:42}},'fresh').current.draftId,'fresh');});
+test('X count includes Japanese weighting and all labels',async()=>{const {xWeightedLength}=await import('../web/model.js');assert.equal(xWeightedLength('日本abc'),7);assert.equal(xWeightedLength('https://example.com/path 日本'),28);});

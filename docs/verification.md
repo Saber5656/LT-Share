@@ -52,3 +52,15 @@ OpenAIの[ChatGPT plan usage公式資料](https://developers.openai.com/siwc/tok
 | D. 手入力のまま提供する（v1 の現状） | 要件の AI 部分（FR-05）は未達 | なし |
 
 アプリ側は `app/src/lib/ai.ts` の `getAiProvider()` に提供元を差し込めば、生成中・失敗・再試行の表示がそのまま使える構成にしている。
+
+## 2026-10-18 ChatGPT内アプリ試作
+
+最新指示「一旦ChatGPT内アプリとして構築してみて」により `chatgpt-app/` を追加。元の `app/` とSites版は維持。
+
+- ChatGPTの会話モデルが写真を理解・要約し、MCPツール `render_lt_post` がフォームに本文を表示する。別途推論API・秘密キー・独自DBなし。接続のためSites認証付きステートレスMCPのみ追加。
+- 公式MCP Apps bridge、ChatGPT uploadFile / imageIds / widgetState。独自バックエンドから本人枠を呼ぶSIWC申請とは別の経路。
+- タグ継承、任意の開発者ラベル、確認/コピー/Xリンク、同じカード内の履歴、投稿案JSON退避。新しい会話・カードとの履歴同期は未対応。
+- unit20件 / host fixtureブラウザ6件成功。RED確認後修正。実際の画像認識・ChatGPT使用量の計測ではない。
+- Chromeの表示と本文編集→投稿確認の実操作を確認。Product Design QAと画像は `chatgpt-app/design-qa.md`。テスト用ホストは公開workerに含めない。
+- 独立レビューでホストのisError拒否・待機解除不足の2点を採用し修正。秘密/個人パス混入は自己レビューで検査。
+- 写真アプリへの直接保存、動画音声要約、Xネイティブの起動、実際のChatGPT内画像生成フローは未検証/未達。本人環境の接続・試用で続けて確認する。
