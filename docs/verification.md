@@ -64,3 +64,5 @@ OpenAIの[ChatGPT plan usage公式資料](https://developers.openai.com/siwc/tok
 - Chromeの表示と本文編集→投稿確認の実操作を確認。Product Design QAと画像は `chatgpt-app/design-qa.md`。テスト用ホストは公開workerに含めない。
 - 独立レビューでホストのisError拒否・待機解除不足の2点を採用し修正。秘密/個人パス混入は自己レビューで検査。
 - 写真アプリへの直接保存、動画音声要約、Xネイティブの起動、実際のChatGPT内画像生成フローは未検証/未達。本人環境の接続・試用で続けて確認する。
+
+公開は本人限定で成功。SitesがChatGPT用プラグインを作成し、自動インストール済みと返された。実行中の会話のツール一覧には未反映のため、新しいChatGPT会話での接続・写真要約が次の確認。公開先・版・残作業は `chatgpt-app-deployment.md` に記録。
