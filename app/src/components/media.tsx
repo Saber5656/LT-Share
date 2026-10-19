@@ -175,6 +175,24 @@ export function DeviceSaveStatus({
     );
   }
 
+  if (media.source === "library" && onConfirm) {
+    return (
+      <div className="save-box is-ask" aria-live="polite">
+        <p className="status-line is-strong">
+          <QuestionIcon size={20} weight="fill" aria-hidden="true" />
+          元の{noun}は端末にありますか？
+        </p>
+        <p className="save-hint">写真アプリなどに原本があれば、保存し直す必要はありません。</p>
+        <div className="save-actions">
+          <button type="button" className="small-button is-primary" onClick={onConfirm}>
+            元のファイルが端末にある
+          </button>
+          {onSave ? <button type="button" className="small-button" onClick={onSave} disabled={!ready}>端末に保存</button> : null}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="save-box is-warn" aria-live="polite">
       <div className="save-row">

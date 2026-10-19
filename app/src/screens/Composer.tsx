@@ -3,6 +3,7 @@ import {
   ArrowsClockwiseIcon,
   CameraIcon,
   CaretRightIcon,
+  ImagesIcon,
   PlusIcon,
   WarningCircleIcon,
   XIcon,
@@ -42,6 +43,7 @@ export function Composer() {
           action={<RecordControls openPicker={picker.open} />}
         >
           <MediaBlock openPicker={picker.open} />
+          <LibraryControl openPicker={picker.openLibrary} />
           <AutoSummarySetting />
         </Step>
 
@@ -135,58 +137,61 @@ function TagField() {
 
 const PICKER_ACCEPT = { photo: "image/*", video: "video/*" } as const;
 
-// Two hidden pickers, one per kind, so the OS opens the matching camera UI (FR-02).
-// Choosing nothing (cancel) never fires onChange, so the draft stays untouched.
+// Camera inputs keep capture; the separate library input lets the OS offer Photos.
+// Choosing nothing leaves the draft untouched, including after replacement approval.
 function useRecordPicker() {
   const { state, captureKind, captureFile } = useApp();
-  const inputs = { photo: useRef<HTMLInputElement>(null), video: useRef<HTMLInputElement>(null) };
+  const inputs = { photo: useRef<HTMLInputElement>(null), video: useRef<HTMLInputElement>(null), library: useRef<HTMLInputElement>(null) };
   const media = state.current.media;
-  const [confirming, setConfirming] = useState(false);
+  const [pendingPicker, setPendingPicker] = useState<MediaKind | "library" | null>(null);
+  const fromLibrary = pendingPicker === "library";
 
   // The picker has to be opened straight from a tap (user activation), so both the
   // direct path and the confirmation button call this synchronously.
-  const openFilePicker = () => inputs[captureKind].current?.click();
+  const openFilePicker = (target: MediaKind | "library") => inputs[target].current?.click();
 
-  const open = () => {
+  const open = (target: MediaKind | "library") => {
     // Re-recording replaces what the draft holds. If the old file never reached the
     // device, make sure the user means it (NFR-02). This is an in-app dialog, not
     // window.confirm: in-app browsers (such as the X app's WebView) may suppress that.
     if (media && media.saveStatus !== "saved") {
-      setConfirming(true);
+      setPendingPicker(target);
       return;
     }
-    openFilePicker();
+    openFilePicker(target);
   };
 
   const confirmDialog = (
     <Sheet
-      open={confirming}
-      onClose={() => setConfirming(false)}
-      title="撮り直しますか？"
-      description={`いまの${media ? mediaNoun(media.kind) : "記録"}はまだ端末に保存されていません。撮り直すと、アプリ内のこの記録は置き換わります（端末の写真アプリに保存済みのものは消えません）。`}
+      open={pendingPicker !== null}
+      onClose={() => setPendingPicker(null)}
+      title={fromLibrary ? "記録を置き換えますか？" : "撮り直しますか？"}
+      description={`いまの${media ? mediaNoun(media.kind) : "記録"}は端末に保存済みか確認できていません。${fromLibrary ? "選び直す" : "撮り直す"}と、アプリ内のこの記録は置き換わります（端末の写真アプリに保存済みのものは消えません）。`}
     >
       <div className="sheet-actions">
         <button
           type="button"
           className="primary-button"
           onClick={() => {
-            setConfirming(false);
-            openFilePicker();
+            if (pendingPicker === null) return;
+            const target = pendingPicker;
+            setPendingPicker(null);
+            openFilePicker(target);
           }}
         >
-          撮り直す
+          {fromLibrary ? "選び直す" : "撮り直す"}
         </button>
-        <button type="button" className="text-button" onClick={() => setConfirming(false)}>
+        <button type="button" className="text-button" onClick={() => setPendingPicker(null)}>
           やめる
         </button>
       </div>
     </Sheet>
   );
 
-  const onPicked = (kind: MediaKind) => (event: ChangeEvent<HTMLInputElement>) => {
+  const onPicked = (kind: MediaKind, source?: "library") => (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = ""; // so choosing the same file again still fires
-    if (file) void captureFile(file, kind);
+    if (file) void captureFile(file, kind, source);
   };
 
   const hidden = (["photo", "video"] as const).map((kind) => (
@@ -204,7 +209,31 @@ function useRecordPicker() {
     />
   ));
 
-  return { open, inputs: hidden, confirmDialog };
+  return {
+    open: () => open(captureKind),
+    openLibrary: () => open("library"),
+    inputs: <>{hidden}<input
+      ref={inputs.library}
+      className="visually-hidden"
+      type="file"
+      accept="image/*,video/*"
+      tabIndex={-1}
+      aria-hidden="true"
+      data-testid="pick-library"
+      onChange={onPicked("photo", "library")}
+    /></>,
+    confirmDialog,
+  };
+}
+
+function LibraryControl({ openPicker }: { openPicker: () => void }) {
+  const { saveBusy, captureBusy } = useApp();
+  return (
+    <button type="button" className="outline-button library-button" onClick={openPicker} disabled={saveBusy || captureBusy !== null}>
+      <ImagesIcon size={20} aria-hidden="true" />
+      写真・動画を選ぶ
+    </button>
+  );
 }
 
 function RecordControls({ openPicker }: { openPicker: () => void }) {
@@ -266,7 +295,7 @@ function MediaBlock({ openPicker }: { openPicker: () => void }) {
 
   return (
     <div className="media">
-      <MediaFrame media={media} view={view} missingHint="「記録する」からもう一度選び直してください。" />
+      <MediaFrame media={media} view={view} missingHint="「写真・動画を選ぶ」からもう一度選び直すか、「記録する」で撮影してください。" />
       {importing}
       <DeviceSaveStatus
         media={media}

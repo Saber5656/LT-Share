@@ -4,7 +4,7 @@
 
 export type MediaKind = "photo" | "video";
 
-// "unsaved"    captured and held in the app only; not on the device yet
+// "unsaved"    held in the app; existence of a device original is unconfirmed
 // "confirming" a share sheet / download was handed off; waiting for the user to confirm
 // "saved"      the user confirmed the file is in the photo library / gallery
 // "failed"     the share/download call threw; retry or fall back to a download
@@ -21,6 +21,9 @@ export type Media = {
   name: string;
   size: number;
   saveStatus: SaveStatus;
+  // Optional for old drafts. Library selection may also offer capture on some OSes,
+  // so it is not proof that an original exists in Photos.
+  source?: "camera" | "library";
 };
 
 export type Draft = {
@@ -200,13 +203,13 @@ function updateMediaStatus(
   state: DraftState,
   draftId: string,
   mediaId: string,
-  next: (status: SaveStatus) => SaveStatus,
+  next: (status: SaveStatus, media: Media) => SaveStatus,
 ): DraftState {
   const draft = state.current.id === draftId ? state.current : state.history.find((d) => d.id === draftId);
   const media = draft?.media;
   if (!draft || !media || media.id !== mediaId) return state;
 
-  const status = next(media.saveStatus);
+  const status = next(media.saveStatus, media);
   if (status === media.saveStatus) return state;
   return updateDraft(state, draftId, (d) => ({ ...d, media: { ...media, saveStatus: status } }));
 }
@@ -255,8 +258,8 @@ export function draftReducer(state: DraftState, action: DraftAction): DraftState
         status === "saved" ? status : "confirming",
       );
     case "saveConfirmed":
-      return updateMediaStatus(state, action.draftId, action.mediaId, (status) =>
-        status === "confirming" ? "saved" : status,
+      return updateMediaStatus(state, action.draftId, action.mediaId, (status, media) =>
+        status === "confirming" || (status === "unsaved" && media.source === "library") ? "saved" : status,
       );
     case "saveDeclined":
       return updateMediaStatus(state, action.draftId, action.mediaId, (status) =>

@@ -86,6 +86,8 @@ function PostSheetBody({ draft }: { draft: Draft }) {
           <p>
             {media.saveStatus === "saved"
               ? `${noun}は端末に保存済みです。リンクで渡せるのは本文だけなので、Xで写真アプリから添付してください。`
+              : media.source === "library" && media.saveStatus === "unsaved"
+                ? `${noun}の原本が端末にあるか確認してください。リンクで渡せるのは本文だけです。写真アプリに原本があれば、Xでそのまま添付できます。`
               : `${noun}はまだ端末に保存されていません。Xには本文だけが渡ります。${
                   canShareFile
                     ? `下の「${noun}付きで共有」を使うか、先に「端末に保存」してください。`

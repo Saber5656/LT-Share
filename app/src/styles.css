@@ -429,6 +429,13 @@ button:disabled {
 
 /* Record */
 
+.library-button {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 10px;
+  justify-content: center;
+}
+
 .record-controls {
   display: flex;
   align-items: center;

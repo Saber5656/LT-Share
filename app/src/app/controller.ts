@@ -61,7 +61,7 @@ export type App = {
   retryStorage: () => Promise<void>;
   toast: ToastState | null;
   showToast: (message: string, action?: ToastAction) => void;
-  captureFile: (file: File, fallbackKind: MediaKind) => Promise<void>;
+  captureFile: (file: File, fallbackKind: MediaKind, source?: "library") => Promise<void>;
   // Starts synchronously (call it straight from a click handler).
   saveMedia: (draftId: string, mode?: "auto" | "download") => Promise<void>;
   confirmSaved: (draftId: string, mediaId: string) => void;
@@ -274,7 +274,7 @@ export function useController({
   /* ---------- recording (FR-02) ---------- */
 
   const captureFile = useCallback(
-    async (file: File, fallbackKind: MediaKind) => {
+    async (file: File, fallbackKind: MediaKind, source?: "library") => {
       cancelAi();
       const revision = ++captureRevision.current;
       const kind = kindOf(file, fallbackKind);
@@ -285,6 +285,7 @@ export function useController({
         name: file.name,
         size: file.size,
         saveStatus: "unsaved",
+        source,
       };
 
       // While the file is being stored, 次の投稿へ is blocked (goNext checks this), so
@@ -383,6 +384,10 @@ export function useController({
       }
       const noun = current.media ? mediaNoun(current.media.kind) : "記録";
       document.getElementById("step-record")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      if (blocker === "media-unsaved" && current.media?.source === "library") {
+        showToast(`${noun}の原本が端末にあるか、「記録」の下で確認してください`);
+        return;
+      }
       if (blocker === "media-confirming") {
         showToast(`${noun}を端末に保存できたか、「記録」の下で確認してください`);
         return;
