@@ -23,7 +23,7 @@ export default defineConfig({
   },
   webServer: {
     // Test the production build, served statically like the real host would.
-    command: `npm run build && npx vite preview --host 127.0.0.1 --port ${port} --strictPort`,
+    command: `npm run build -- --outDir .e2e-dist && npx vite preview --outDir .e2e-dist --host 127.0.0.1 --port ${port} --strictPort`,
     url: origin,
     reuseExistingServer: false,
     timeout: 120_000,

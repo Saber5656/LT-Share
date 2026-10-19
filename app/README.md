@@ -71,3 +71,27 @@ LT_E2E_PORT=4391 npm run test:e2e
 - **AI text generation is not connected.** LT Share remains a standalone Sites web app, as confirmed by the product owner on 2026-10-18. ChatGPT plan usage exists, but the hosted-app integration's approval and connection details are not available in this project. A paid ChatGPT subscription and Sites sign-in alone do not configure this integration. `getAiProvider()` in `src/lib/ai.ts` returns `null`, so the UI shows no AI controls. Once the approved integration is established, the `AiProvider` interface (`generate({ image, tags }) => Promise<string>`) and the existing generation/retry states can be reused. See [the current integration status](../docs/verification.md).
 - Draft deletion, retention limits and storage-size limits (U-04, U-05).
 - Not verified on real devices: the iOS/Android share sheet, "画像を保存" into the photo library, the X app hand-off, and video playback from stored blobs on iOS Safari. Browsers may also evict site data (for example Safari after a period without use); the app does not claim permanent storage.
+
+## 2026-10-19 単独Webの自動要約
+
+写真を選ぶと、同じ画面で自動的に投稿文を作ります。自動作成はオフにでき、生成中も本文を編集できます。手入力や写真を消す操作は遅れて来た生成結果で上書きしません。別の写真の結果が現在の写真に混ざらないよう、写真IDでも対応付けます。
+
+AIは運営側のGroq無料枠を使う接続口を実装しています。ChatGPTの契約枠やCodexを外部Webから使う方式とは別です。利用者にAPIキーやChatGPT内の操作を要求しません。実際の生成には運営用キーと無料プラン確認が必要です。未設定・上限時は手入力で進められます。
+
+- Sites runtime secret: `GROQ_API_KEY`
+- Sites runtime configuration: `LT_AI_PROVIDER=groq`
+- 無料プラン確認後のみ: `LT_AI_FREE_TIER_CONFIRMED=true`
+
+無料プランであることはアプリが自動判定できません。カード登録/課金を有効にせず、実際の組織のLimitsを確認してください。APIの429で停止し、自動再試行・別モデル・別キーへの切替をしません。APIキーはブラウザに配布しません。サーバーに写真や下書きを保存するDBはありません。
+
+```sh
+npm run test:unit
+npm run test:server
+npm run test:e2e
+npm run build:worker
+npm run preview:worker -- --port 4395
+```
+
+`npm run build`はブラウザのみの確認用。`build:worker`はフロントを生成後、全アセットを埋め込んだWorkerを`dist/server/index.js`へ出力します。配布manifestは従来のSite IDを維持したWorker方式です。
+
+[構成と利用条件の比較](../docs/ai-delivery-options-20261019.md)。動画の生成は静止画に限り、音声要約ではありません。写真アプリへの自動保存・物理スマホの動作は未確認です。

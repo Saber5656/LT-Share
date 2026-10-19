@@ -42,6 +42,7 @@ export function Composer() {
           action={<RecordControls openPicker={picker.open} />}
         >
           <MediaBlock openPicker={picker.open} />
+          <AutoSummarySetting />
         </Step>
 
         <Step number={3} title="投稿文" titleId="step-body-title" aside={<GenerationLabel />}>
@@ -282,6 +283,31 @@ function MediaBlock({ openPicker }: { openPicker: () => void }) {
 
 /* ---------- ③ post text (FR-05, FR-06) ---------- */
 
+function AutoSummarySetting() {
+  const { aiStatus, autoSummary, setAutoSummary, state, retryGenerate } = useApp();
+  return (
+    <div className="auto-summary-setting">
+      <label className="auto-summary-label">
+        <input type="checkbox" checked={aiStatus.available && autoSummary} disabled={!aiStatus.available} onChange={event => setAutoSummary(event.target.checked)} />
+        写真から自動で投稿文をつくる
+      </label>
+      <p className="field-note">
+        {aiStatus.available
+          ? "写真の縮小コピーをAIへ送信します。原本と投稿案は端末内に残ります。"
+          : aiStatus.reason === "checking"
+            ? "自動作成の接続を確認しています…"
+            : "現在、自動作成を利用できません。写真と投稿案を残して、手入力で進められます。"}
+      </p>
+      {state.current.media?.kind === "video" ? <p className="field-note">動画は冒頭の静止画から文章を作ります。音声や発表全体の要約ではありません。</p> : null}
+      {aiStatus.available && state.current.media && state.current.generation !== "generating" ? (
+        <button className="outline-button" type="button" onClick={() => void retryGenerate(state.current.id)}>
+          {state.current.body ? "投稿文を作り直す" : "投稿文をつくる"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 function GenerationLabel() {
   const { state, aiEnabled } = useApp();
   // No provider, no AI wording: the label only exists once a provider is plugged in.
@@ -325,22 +351,17 @@ function BodyField() {
         </div>
       ) : null}
       {aiEnabled && draft.generation === "generating" ? (
-        <div className="text-box is-loading" aria-busy="true" aria-label="投稿文を生成中">
-          <span className="skeleton" />
-          <span className="skeleton" />
-          <span className="skeleton short" />
-        </div>
-      ) : (
-        <textarea
-          ref={textRef}
-          className="text-box"
-          rows={3}
-          value={draft.body}
-          aria-label="投稿文"
-          placeholder="このLTの内容を入力（100文字程度が目安）"
-          onChange={(event) => dispatch({ type: "setBody", body: event.target.value })}
-        />
-      )}
+        <p className="field-note" role="status" aria-live="polite">投稿文を作成中です。先に編集することもできます。</p>
+      ) : null}
+      <textarea
+        ref={textRef}
+        className="text-box"
+        rows={3}
+        value={draft.body}
+        aria-label="投稿文"
+        placeholder={aiEnabled ? "写真を選ぶと投稿文が入ります。手入力もできます。" : "このLTの内容を入力（100文字程度が目安）"}
+        onChange={(event) => dispatch({ type: "setBody", body: event.target.value })}
+      />
       <PostCounter count={count} />
     </div>
   );

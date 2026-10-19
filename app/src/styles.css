@@ -1183,3 +1183,8 @@ button:disabled {
     transition-duration: 0.01ms !important;
   }
 }
+
+.auto-summary-setting { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line, #e9ebee); }
+.auto-summary-label { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 13px; font-weight: 600; }
+.auto-summary-label input { width: 20px; height: 20px; accent-color: #111214; flex: none; }
+.auto-summary-setting .outline-button { margin-top: 8px; }

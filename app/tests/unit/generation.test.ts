@@ -4,8 +4,8 @@ import { AiQuotaError, getAiProvider, type AiProvider } from "../../src/lib/ai.t
 import { runGeneration } from "../../src/lib/generation.ts";
 import type { DraftAction } from "../../src/lib/draft.ts";
 
-test("no AI provider is available in this version", () => {
-  assert.equal(getAiProvider(), null);
+test("Web inference uses the same-origin HTTP provider", () => {
+  assert.equal(typeof getAiProvider().generate, "function");
 });
 
 function run(provider: AiProvider) {

@@ -10,22 +10,29 @@ export async function runGeneration({
   image,
   tags,
   dispatch,
+  mediaId,
+  replaceUserText = false,
+  alreadyStarted = false,
 }: {
   provider: AiProvider;
   draftId: string;
   image: Blob;
   tags: string[];
   dispatch: (action: DraftAction) => void;
+  mediaId?: string;
+  replaceUserText?: boolean;
+  alreadyStarted?: boolean;
 }): Promise<void> {
-  dispatch({ type: "generateStart", draftId });
+  const target = mediaId ? { draftId, mediaId } : { draftId };
+  if (!alreadyStarted) dispatch({ type: "generateStart", ...target, ...(replaceUserText ? { replaceUserText: true } : {}) });
   try {
     const text = (await provider.generate({ image, tags })).trim();
     if (!text) {
-      dispatch({ type: "generateFailed", draftId, reason: "failed" });
+      dispatch({ type: "generateFailed", ...target, reason: "failed" });
       return;
     }
-    dispatch({ type: "generateDone", draftId, text });
+    dispatch({ type: "generateDone", ...target, text });
   } catch (error) {
-    dispatch({ type: "generateFailed", draftId, reason: error instanceof AiQuotaError ? "quota" : "failed" });
+    dispatch({ type: "generateFailed", ...target, reason: error instanceof AiQuotaError ? "quota" : "failed" });
   }
 }

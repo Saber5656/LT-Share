@@ -260,9 +260,9 @@ test("generated text replaces AI text but never a body the user edited", () => {
   assert.equal(state.current.bodySource, "user");
 });
 
-test("clearing the body hands control back (bodySource none)", () => {
+test("clearing the body remains an explicit user edit", () => {
   const state = draftReducer(stateWithDraft(), { type: "setBody", body: "   " });
-  assert.equal(state.current.bodySource, "none");
+  assert.equal(state.current.bodySource, "user");
 });
 
 test("generateFailed and openedInX update a draft that is already saved", () => {
@@ -293,4 +293,30 @@ test("removeTag removes exactly the given tag", () => {
   const state = draftReducer(stateWithDraft(), { type: "addTags", input: "#Rust" });
   const removed = draftReducer(state, { type: "removeTag", tag: "#TechLTNight" });
   assert.deepEqual(removed.current.tags, ["#Rust"]);
+});
+
+test('AI results from a replaced photo cannot change the new photo draft', () => {
+  const state = stateWithDraft({ media: media('unsaved', {id:'new-photo'}) });
+  const next = draftReducer(state, {type:'generateDone', draftId:'d3', mediaId:'old-photo', text:'wrong slide'});
+  assert.equal(next.current.body, state.current.body);
+  assert.equal(next.current.generation, state.current.generation);
+});
+test('explicit regeneration replaces old text but preserves edits made during the request', () => {
+  let state = stateWithDraft({body:'old edit',bodySource:'user'});
+  state = draftReducer(state,{type:'generateStart',draftId:'d3',replaceUserText:true});
+  assert.equal(state.current.body,'old edit');
+  state = draftReducer(state,{type:'generateDone',draftId:'d3',text:'new AI'});
+  assert.equal(state.current.body,'new AI');
+  state = draftReducer(state,{type:'generateStart',draftId:'d3',replaceUserText:true});
+  state = draftReducer(state,{type:'setBody',body:'newer user edit'});
+  state = draftReducer(state,{type:'generateDone',draftId:'d3',text:'late AI'});
+  assert.equal(state.current.body,'newer user edit');
+});
+test('clearing the field while generation waits is an edit and stays empty',()=>{
+  let state=stateWithDraft({body:'',bodySource:'none'});
+  state=draftReducer(state,{type:'generateStart',draftId:'d3'});
+  state=draftReducer(state,{type:'setBody',body:'typed'});
+  state=draftReducer(state,{type:'setBody',body:''});
+  state=draftReducer(state,{type:'generateDone',draftId:'d3',text:'late result'});
+  assert.equal(state.current.body,'');
 });

@@ -531,7 +531,7 @@ test("the first-run notice is shown once and can be reopened", async ({ page }) 
 
   await expect(page.getByRole("heading", { name: "データの扱い" })).toBeVisible();
   await expect(page.getByText("この端末（ブラウザ）に保存します", { exact: false })).toBeVisible();
-  await expect(page.getByText("独自のサーバーやデータベースを持たない設計です", { exact: false })).toBeVisible();
+  await expect(page.getByText("サーバーは画像や投稿案を保存せず", { exact: false })).toBeVisible();
   await expect(page.getByText(/一切.*送信されない/)).toHaveCount(0);
 
   await page.getByRole("button", { name: "はじめる" }).click();

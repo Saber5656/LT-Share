@@ -53,9 +53,9 @@ export type DraftAction =
   | { type: "saveConfirmed"; draftId: string; mediaId: string }
   | { type: "saveDeclined"; draftId: string; mediaId: string }
   | { type: "saveFailed"; draftId: string; mediaId: string }
-  | { type: "generateStart"; draftId: string }
-  | { type: "generateDone"; draftId: string; text: string }
-  | { type: "generateFailed"; draftId: string; reason: "failed" | "quota" }
+  | { type: "generateStart"; draftId: string; mediaId?: string; replaceUserText?: boolean }
+  | { type: "generateDone"; draftId: string; mediaId?: string; text: string }
+  | { type: "generateFailed"; draftId: string; mediaId?: string; reason: "failed" | "quota" }
   | { type: "setBody"; body: string }
   | { type: "setIncludeDeveloper"; value: boolean }
   | { type: "openedInX"; draftId: string }
@@ -265,20 +265,20 @@ export function draftReducer(state: DraftState, action: DraftAction): DraftState
         status === "saved" ? status : "failed",
       );
     case "generateStart":
-      return updateDraft(state, action.draftId, (draft) => ({ ...draft, generation: "generating" }));
+      return updateDraft(state, action.draftId, (draft) => action.mediaId && draft.media?.id !== action.mediaId ? draft : ({ ...draft, bodySource: action.replaceUserText ? "none" : draft.bodySource, generation: "generating" }));
     case "generateDone":
       // NFR-02: never overwrite text the user wrote or edited.
       return updateDraft(state, action.draftId, (draft) =>
-        draft.bodySource === "user"
+        action.mediaId && draft.media?.id !== action.mediaId ? draft : draft.bodySource === "user"
           ? { ...draft, generation: "done" }
           : { ...draft, body: action.text, bodySource: "ai", generation: "done" },
       );
     case "generateFailed":
-      return updateDraft(state, action.draftId, (draft) => ({ ...draft, generation: action.reason }));
+      return updateDraft(state, action.draftId, (draft) => action.mediaId && draft.media?.id !== action.mediaId ? draft : ({ ...draft, generation: action.reason }));
     case "setBody":
       return {
         ...state,
-        current: { ...state.current, body: action.body, bodySource: action.body.trim() ? "user" : "none" },
+        current: { ...state.current, body: action.body, bodySource: "user" },
       };
     case "setIncludeDeveloper":
       return { ...state, current: { ...state.current, includeDeveloper: action.value } };
