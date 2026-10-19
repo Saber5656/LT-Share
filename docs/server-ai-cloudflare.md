@@ -31,7 +31,7 @@ Workers Freeで1日10,000 Neuronsまで。上限に達するとエラーとな�
 
 ## 検証・制限
 
-型・ユニット・HTTP境界・ブラウザ操作・配布ビルドと、Cloudflare上の実推論・スマホ実機は別々に記録する。現状は[verification.md](verification.md)を参照。
+Cloudflare上の実写真推論と本人限定Sitesへの配備・接続を確認済み。スマホ実機およびログインから写真アップロードまでの本番ブラウザ一貫試験は未実施。型・ユニット・HTTP境界・ブラウザ操作・配布ビルドと実推論は別々に記録する。詳しくは[verification.md](verification.md)を参照。
 
 動画は冒頭の1フレームだけを読む。写真ライブラリへの直接保存、Xアプリの実機起動は今回のサーバー要約変更で確認済みにならない。
 
@@ -42,3 +42,5 @@ Workers Freeで1日10,000 Neuronsまで。上限に達するとエラーとな�
 - [Workers AI binding](https://developers.cloudflare.com/workers-ai/configuration/bindings/)
 - [エラーコード](https://developers.cloudflare.com/workers-ai/platform/errors/)
 - [入力・出力の取扱い](https://developers.cloudflare.com/workers-ai/platform/data-usage/)
+
+SitesのWorkerでは `redirect:error` が未対応のため `redirect:manual` を使い、3xxを含む非2xx応答を拒否する。転送先へ共有secretを送らない。ホスト提供fetchはreceiverを保持して呼び出す。

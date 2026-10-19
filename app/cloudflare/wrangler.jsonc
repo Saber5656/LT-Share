@@ -2,7 +2,7 @@
   "$schema": "../node_modules/wrangler/config-schema.json",
   "name": "lt-share-ai",
   "main": "../server/cloudflare-ai.mjs",
-  "compatibility_date": "2026-10-20",
+  "compatibility_date": "2026-10-19",
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,

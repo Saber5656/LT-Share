@@ -19,7 +19,7 @@ test('unconfigured summary is unavailable',async()=>{const {worker,calls}=fixtur
 test('bridge sends only validated bytes to configured HTTPS worker without redirects',async()=>{
  const {worker,calls}=fixture();const r=await worker.fetch(request({tags:'["技術"]',headers:{Origin:'https://lt.example'}}),env);
  assert.equal(r.status,200);assert.deepEqual(await r.json(),{text:'画面に表示された技術の説明です。'});
- const [url,init]=calls[0];assert.equal(url,env.LT_AI_ENDPOINT);assert.equal(init.redirect,'error');assert.equal(init.headers.Authorization,'Bearer test-secret');assert.equal(init.headers['Content-Type'],'image/png');assert.deepEqual(init.body,png);
+ const [url,init]=calls[0];assert.equal(url,env.LT_AI_ENDPOINT);assert.equal(init.redirect,'manual');assert.equal(init.headers.Authorization,'Bearer test-secret');assert.equal(init.headers['Content-Type'],'image/png');assert.deepEqual(init.body,png);
 });
 test('invalid endpoints and missing bridge secret fail closed',async()=>{
  for(const endpoint of ['http://example.workers.dev/summary','https://evil.example/summary','https://example.workers.dev/summary?token=secret','https://user:pass@example.workers.dev/summary','https://example.workers.dev/other']){
@@ -56,4 +56,41 @@ test('status checks authenticated bridge health without inference and fails clos
  for(const status of [401,403,503]) {const {worker,calls}=fixture(()=>new Response('private',{status}));const r=await worker.fetch(new Request('https://lt.example/api/ai/status'),env);assert.equal((await r.json()).available,false);assert.equal(calls[0][0],'https://lt-share-ai.example.workers.dev/health');assert.equal(calls[0][1].headers.Authorization,'Bearer test-secret');assert.equal(calls[0][1].method,'GET');}
  const {worker}=fixture(()=>Response.json({available:true}));assert.equal((await (await worker.fetch(new Request('https://lt.example/api/ai/status'),env)).json()).available,true);
  const {worker:slow}=fixture(()=>new Promise(()=>{}),{timeoutMs:5});assert.equal((await (await slow.fetch(new Request('https://lt.example/api/ai/status'),env)).json()).available,false);
+});
+
+test('default transport keeps the host fetch receiver for health and summary',async(t)=>{
+ t.mock.method(globalThis,'fetch',async function(url){
+   if(this!==globalThis) throw new TypeError('Illegal invocation');
+   return url.endsWith('/health')?Response.json({available:true}):result();
+ });
+ const worker=createWorker();
+ assert.equal((await (await worker.fetch(new Request('https://lt.example/api/ai/status'),env)).json()).available,true);
+ assert.equal((await worker.fetch(request(),env)).status,200);
+});
+
+test('edge-compatible transport never follows upstream redirects',async()=>{
+ for(const status of [301,302,307,308]){
+  const calls=[];
+  const worker=createWorker({}, {fetch:async(url,init)=>{
+   calls.push([url,init]);
+   if(!['follow','manual'].includes(init.redirect))throw new TypeError('Invalid redirect value');
+   assert.equal(init.redirect,'manual');
+   return new Response(null,{status,headers:{Location:'https://untrusted.example/'}});
+  }});
+  const health=await worker.fetch(new Request('https://lt.example/api/ai/status'),env);
+  assert.equal((await health.json()).available,false);
+  const summary=await worker.fetch(request(),env);
+  assert.equal(summary.status,502);
+  assert.equal(calls.length,2);
+  assert.ok(calls.every(([url,init])=>url.startsWith('https://lt-share-ai.example.workers.dev/') && init.redirect==='manual'));
+ }
+});
+
+test('health and summary succeed on a Workers-compatible fetch',async()=>{
+ const worker=createWorker({}, {fetch:async(url,init)=>{
+  if(!['follow','manual'].includes(init.redirect))throw new TypeError('Invalid redirect value');
+  return url.endsWith('/health')?Response.json({available:true}):result();
+ }});
+ assert.equal((await (await worker.fetch(new Request('https://lt.example/api/ai/status'),env)).json()).available,true);
+ assert.equal((await worker.fetch(request(),env)).status,200);
 });
