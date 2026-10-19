@@ -7,7 +7,7 @@ import {
   useState,
   type Dispatch,
 } from "react";
-import { getAiProvider, loadAiStatus, type AiStatus } from "../lib/ai.ts";
+import { useLocalAi, type LocalAiView } from "./useLocalAi.ts";
 import { sharePostWithMedia } from "../lib/deviceShare.ts";
 import {
   composeDraftPost,
@@ -46,7 +46,9 @@ export type App = {
   nav: Navigation;
   persistence: Persistence;
   aiEnabled: boolean;
-  aiStatus: AiStatus;
+  localAiState: LocalAiView;
+  prepareAi: () => Promise<void>;
+  cancelAi: () => void;
   autoSummary: boolean;
   setAutoSummary: (enabled: boolean) => void;
   captureKind: MediaKind;
@@ -116,6 +118,7 @@ export function useController({
   // Set while a captured file is being stored (kind shown in the indicator).
   const [captureBusy, setCaptureBusy] = useState<MediaKind | null>(null);
   const captureBusyRef = useRef(false);
+  const captureRevision = useRef(0);
   const [toast, setToast] = useState<ToastState | null>(null);
   const [storageProblem, setStorageProblem] = useState<StorageProblem | null>(initialProblem);
 
@@ -123,7 +126,9 @@ export function useController({
 
   const findDraft = useCallback((draftId: string | null) => findDraftIn(stateRef.current, draftId), []);
   const nav = useNavigation({ view: firstRun ? "welcome" : "composer" }, (id) => findDraft(id) !== null);
-  const [aiStatus, setAiStatus] = useState<AiStatus>({ available: false, reason: "checking" });
+  const local = useLocalAi();
+  const localRef = useRef(local);
+  useLayoutEffect(() => { localRef.current = local; }, [local]);
   const [autoSummary, setAutoSummaryState] = useState(() => {
     try { return browserStorage()?.getItem("lt-share:auto-summary") !== "0"; } catch { return true; }
   });
@@ -131,12 +136,9 @@ export function useController({
     setAutoSummaryState(enabled);
     try { browserStorage()?.setItem("lt-share:auto-summary", enabled ? "1" : "0"); } catch { /* optional preference */ }
   }, []);
-  const aiEnabled = aiStatus.available && autoSummary;
-  useEffect(() => {
-    let alive = true;
-    void loadAiStatus().then(status => { if (alive) setAiStatus(status); });
-    return () => { alive = false; };
-  }, []);
+  const aiEnabled = (local.state.phase === "ready" || local.state.phase === "generating") && autoSummary;
+  const autoSummaryRef = useRef(autoSummary);
+  useLayoutEffect(() => { autoSummaryRef.current = autoSummary; }, [autoSummary]);
 
   const showToast = useCallback((message: string, action?: ToastAction) => {
     setToast({ id: Date.now() + Math.random(), message, action });
@@ -199,30 +201,75 @@ export function useController({
     if (ok) showToast("端末内（ブラウザ）に保存しました");
   }, [persistence, persist, showToast]);
 
-  /* ---------- Same-origin image summarization ---------- */
+  /* ---------- Explicitly prepared on-device AI ---------- */
 
-  const retryGenerate = useCallback(
-    async (draftId: string) => {
-      const provider = getAiProvider();
-      const draft = findDraftIn(stateRef.current, draftId);
-      if (!aiStatus.available || !draft?.media || draft.generation === "generating") return;
-      const mediaId = draft.media.id;
-      if (activeGenerations.current.has(mediaId)) return;
-      activeGenerations.current.add(mediaId);
-      dispatch({ type: "generateStart", draftId, mediaId, replaceUserText: true });
-      try {
-        const image = await persistence.getMedia(mediaId).catch(() => null);
-        if (!image) { dispatch({type:"generateFailed",draftId,mediaId,reason:"failed"}); return; }
-        await runGeneration({ provider, draftId, mediaId, image, tags: draft.tags, dispatch, alreadyStarted: true });
-      } finally { activeGenerations.current.delete(mediaId); }
-    },
-    [persistence, aiStatus.available],
-  );
+  const generationEpoch = useRef(0);
+  const activeTarget = useRef<{draftId: string; mediaId: string} | null>(null);
+  useEffect(() => () => { generationEpoch.current++; }, []);
+
+  const cancelAi = useCallback(() => {
+    generationEpoch.current++;
+    const target = activeTarget.current;
+    activeTarget.current = null;
+    activeGenerations.current.clear();
+    localRef.current.cancel();
+    if (target) dispatch({ type: "generateFailed", ...target, reason: "failed" });
+  }, []);
+
+  const generateDraft = useCallback(async (draft: Draft, replaceUserText = false, captured?: Blob) => {
+    if (localRef.current.state.phase !== "ready" || !draft.media || activeGenerations.current.size) return;
+    const mediaId = draft.media.id;
+    const draftId = draft.id;
+    const epoch = generationEpoch.current;
+    activeGenerations.current.add(mediaId);
+    activeTarget.current = {draftId, mediaId};
+    // Mark user replacement before awaiting storage, so subsequent edits/clears win.
+    dispatch({type: "generateStart", draftId, mediaId, replaceUserText});
+    const guardedDispatch = (action: DraftAction) => {
+      if (generationEpoch.current === epoch) dispatch(action);
+    };
+    try {
+      const image = captured ?? await persistence.getMedia(mediaId).catch(() => null);
+      if (generationEpoch.current !== epoch) return;
+      const latest = findDraftIn(stateRef.current, draftId);
+      if (!captured && (!latest || latest.media?.id !== mediaId || (latest.bodySource === "user" && !latest.generationReplacesUserText))) {
+        guardedDispatch({type: "generateFailed", draftId, mediaId, reason: "failed"});
+        return;
+      }
+      if (!image) { guardedDispatch({type: "generateFailed", draftId, mediaId, reason: "failed"}); return; }
+      await runGeneration({provider: localRef.current.provider, draftId, mediaId, image, tags: draft.tags, dispatch: guardedDispatch, alreadyStarted: true});
+    } finally {
+      if (generationEpoch.current === epoch) {
+        activeGenerations.current.delete(mediaId);
+        activeTarget.current = null;
+      }
+    }
+  }, [persistence]);
+
+  const retryGenerate = useCallback(async (draftId: string) => {
+    const draft = findDraftIn(stateRef.current, draftId);
+    if (draft) await generateDraft(draft, true);
+  }, [generateDraft]);
+
+  const prepareAi = useCallback(async () => {
+    try { await localRef.current.prepare(); }
+    catch { /* The hook exposes preparation failures and cancellation in its state. */ }
+  }, []);
+
+  const previousPhase = useRef(local.state.phase);
+  useEffect(() => {
+    const prepared = previousPhase.current === "loading" && local.state.phase === "ready";
+    previousPhase.current = local.state.phase;
+    if (!prepared || !autoSummaryRef.current || captureBusyRef.current) return;
+    const draft = stateRef.current.current;
+    if (draft.media?.kind === "photo" && draft.bodySource !== "user") void generateDraft(draft);
+  }, [local.state.phase, generateDraft]);
 
   /* ---------- recording (FR-02) ---------- */
 
   const captureFile = useCallback(
     async (file: File, fallbackKind: MediaKind) => {
+      const revision = ++captureRevision.current;
       const kind = kindOf(file, fallbackKind);
       const media: Media = {
         id: newId(),
@@ -240,6 +287,10 @@ export function useController({
       try {
         // Store the blob first; the draft only points at it once it is in the media store.
         const stored = await persistence.putMedia(media.id, file);
+        if (revision !== captureRevision.current) {
+          persistence.queueMediaDelete(media.id);
+          return;
+        }
         if (!stored.persisted && persistence.available) setStorageProblem({ kind: "write" });
         // After the first successful save, ask the browser to keep this site's storage (best effort, once).
         if (stored.persisted) void requestPersistentStorage(navigator.storage, browserStorage());
@@ -248,15 +299,17 @@ export function useController({
         if (current.media) persistence.queueMediaDelete(current.media.id);
         dispatch({ type: "mediaCaptured", draftId: current.id, media });
         // Inference starts from the captured file, independently of the Photos save flow.
-        if (aiEnabled && current.bodySource !== "user") {
-          void runGeneration({ provider: getAiProvider(), draftId: current.id, mediaId: media.id, image: file, tags: current.tags, dispatch });
+        if (localRef.current.state.phase === "ready" && autoSummaryRef.current && current.bodySource !== "user") {
+          void generateDraft({ ...current, media }, false, file);
         }
       } finally {
-        captureBusyRef.current = false;
-        setCaptureBusy(null);
+        if (revision === captureRevision.current) {
+          captureBusyRef.current = false;
+          setCaptureBusy(null);
+        }
       }
     },
-    [persistence, aiEnabled],
+    [persistence, generateDraft],
   );
 
   /* ---------- save to device (FR-03) ---------- */
@@ -425,7 +478,9 @@ export function useController({
     nav,
     persistence,
     aiEnabled,
-    aiStatus,
+    localAiState: local.state,
+    prepareAi,
+    cancelAi,
     autoSummary,
     setAutoSummary,
     captureKind,

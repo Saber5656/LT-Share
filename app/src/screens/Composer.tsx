@@ -284,22 +284,31 @@ function MediaBlock({ openPicker }: { openPicker: () => void }) {
 /* ---------- ③ post text (FR-05, FR-06) ---------- */
 
 function AutoSummarySetting() {
-  const { aiStatus, autoSummary, setAutoSummary, state, retryGenerate } = useApp();
+  const { localAiState: ai, prepareAi, cancelAi, autoSummary, setAutoSummary, state, retryGenerate } = useApp();
   return (
     <div className="auto-summary-setting">
+      <strong>端末内AI <span className="badge is-muted">試験機能</span></strong>
+      <p className="field-note">初回は約0.9GBのダウンロードが必要です。Wi-Fiを推奨します。写真は外部へ送信せず、この端末内で処理します。</p>
       <label className="auto-summary-label">
-        <input type="checkbox" checked={aiStatus.available && autoSummary} disabled={!aiStatus.available} onChange={event => setAutoSummary(event.target.checked)} />
+        <input type="checkbox" checked={autoSummary} onChange={event => setAutoSummary(event.target.checked)} />
         写真から自動で投稿文をつくる
       </label>
-      <p className="field-note">
-        {aiStatus.available
-          ? "写真の縮小コピーをAIへ送信します。原本と投稿案は端末内に残ります。"
-          : aiStatus.reason === "checking"
-            ? "自動作成の接続を確認しています…"
-            : "現在、自動作成を利用できません。写真と投稿案を残して、手入力で進められます。"}
-      </p>
+      {ai.phase === "checking" ? <p className="field-note" role="status">端末内AIへの対応を確認しています…</p> : null}
+      {ai.phase === "unsupported" ? <p className="field-note" role="status">この端末では端末内AIを利用できません。写真を残して、手入力で続けられます。</p> : null}
+      {ai.phase === "idle" || ai.phase === "error" ? <>
+        {ai.phase === "error" ? <p className="field-note" role="alert">端末内AIを利用できませんでした。もう一度準備するか、手入力で続けられます。</p> : null}
+        <p className="field-note">再訪時もボタンを押して準備します。保存済みのモデルがあればキャッシュを再使用します。</p>
+        <button className="outline-button" type="button" onClick={() => void prepareAi()}>端末内AIを準備</button>
+      </> : null}
+      {ai.phase === "loading" ? <div className="local-ai-progress" role="status">
+        <label htmlFor="local-ai-progress">端末内AIを準備中… {Math.round((ai.progress ?? 0) * 100)}%</label>
+        <progress id="local-ai-progress" max={1} value={ai.progress ?? 0} />
+        <button className="outline-button" type="button" onClick={cancelAi}>準備を中止</button>
+      </div> : null}
+      {ai.phase === "ready" ? <p className="field-note" role="status">端末内AIの準備ができました。</p> : null}
+      {ai.phase === "generating" || (ai.phase === "ready" && state.current.generation === "generating") ? <button className="outline-button" type="button" onClick={cancelAi}>生成を中止</button> : null}
       {state.current.media?.kind === "video" ? <p className="field-note">動画は冒頭の静止画から文章を作ります。音声や発表全体の要約ではありません。</p> : null}
-      {aiStatus.available && state.current.media && state.current.generation !== "generating" ? (
+      {ai.phase === "ready" && state.current.media && state.current.generation !== "generating" ? (
         <button className="outline-button" type="button" onClick={() => void retryGenerate(state.current.id)}>
           {state.current.body ? "投稿文を作り直す" : "投稿文をつくる"}
         </button>
@@ -309,9 +318,7 @@ function AutoSummarySetting() {
 }
 
 function GenerationLabel() {
-  const { state, aiEnabled } = useApp();
-  // No provider, no AI wording: the label only exists once a provider is plugged in.
-  if (!aiEnabled) return null;
+  const { state } = useApp();
   const { generation, bodySource } = state.current;
   if (generation === "generating") return <>AIで生成中…</>;
   if (bodySource === "user") return <>編集済み</>;
@@ -320,7 +327,7 @@ function GenerationLabel() {
 }
 
 function BodyField() {
-  const { state, dispatch, aiEnabled, retryGenerate } = useApp();
+  const { state, dispatch, aiEnabled, localAiState, retryGenerate } = useApp();
   const draft = state.current;
   const count = xWeightedLength(composeDraftPost(draft));
   const textRef = useRef<HTMLTextAreaElement>(null);
@@ -335,7 +342,7 @@ function BodyField() {
 
   return (
     <div className="body-field">
-      {aiEnabled && (draft.generation === "failed" || draft.generation === "quota") ? (
+      {localAiState.phase === "ready" && (draft.generation === "failed" || draft.generation === "quota") ? (
         <div className="notice is-error" role="alert">
           <WarningCircleIcon size={20} weight="fill" aria-hidden="true" />
           <div>
@@ -350,7 +357,7 @@ function BodyField() {
           </div>
         </div>
       ) : null}
-      {aiEnabled && draft.generation === "generating" ? (
+      {draft.generation === "generating" ? (
         <p className="field-note" role="status" aria-live="polite">投稿文を作成中です。先に編集することもできます。</p>
       ) : null}
       <textarea

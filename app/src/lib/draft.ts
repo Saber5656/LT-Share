@@ -32,6 +32,8 @@ export type Draft = {
   tags: string[];
   body: string;
   bodySource: BodySource;
+  // Replacement permission belongs only to the current generation, never the text.
+  generationReplacesUserText?: boolean;
   media: Media | null;
   includeDeveloper: boolean;
   generation: Generation;
@@ -247,7 +249,7 @@ export function draftReducer(state: DraftState, action: DraftAction): DraftState
       if (state.current.id !== action.draftId) return state;
       // A new recording replaces the previous one. The body stays: text the user
       // wrote is never discarded (NFR-02).
-      return { ...state, current: { ...state.current, media: action.media, generation: "idle" } };
+      return { ...state, current: { ...state.current, media: action.media, generation: "idle", generationReplacesUserText: false } };
     case "saveHandedOff":
       return updateMediaStatus(state, action.draftId, action.mediaId, (status) =>
         status === "saved" ? status : "confirming",
@@ -265,20 +267,20 @@ export function draftReducer(state: DraftState, action: DraftAction): DraftState
         status === "saved" ? status : "failed",
       );
     case "generateStart":
-      return updateDraft(state, action.draftId, (draft) => action.mediaId && draft.media?.id !== action.mediaId ? draft : ({ ...draft, bodySource: action.replaceUserText ? "none" : draft.bodySource, generation: "generating" }));
+      return updateDraft(state, action.draftId, (draft) => action.mediaId && draft.media?.id !== action.mediaId ? draft : ({ ...draft, generationReplacesUserText: action.replaceUserText === true, generation: "generating" }));
     case "generateDone":
       // NFR-02: never overwrite text the user wrote or edited.
       return updateDraft(state, action.draftId, (draft) =>
-        action.mediaId && draft.media?.id !== action.mediaId ? draft : draft.bodySource === "user"
-          ? { ...draft, generation: "done" }
-          : { ...draft, body: action.text, bodySource: "ai", generation: "done" },
+        action.mediaId && draft.media?.id !== action.mediaId ? draft : draft.bodySource === "user" && !draft.generationReplacesUserText
+          ? { ...draft, generation: "done", generationReplacesUserText: false }
+          : { ...draft, body: action.text, bodySource: "ai", generation: "done", generationReplacesUserText: false },
       );
     case "generateFailed":
-      return updateDraft(state, action.draftId, (draft) => action.mediaId && draft.media?.id !== action.mediaId ? draft : ({ ...draft, generation: action.reason }));
+      return updateDraft(state, action.draftId, (draft) => action.mediaId && draft.media?.id !== action.mediaId ? draft : ({ ...draft, generation: action.reason, generationReplacesUserText: false }));
     case "setBody":
       return {
         ...state,
-        current: { ...state.current, body: action.body, bodySource: "user" },
+        current: { ...state.current, body: action.body, bodySource: "user", generationReplacesUserText: false },
       };
     case "setIncludeDeveloper":
       return { ...state, current: { ...state.current, includeDeveloper: action.value } };

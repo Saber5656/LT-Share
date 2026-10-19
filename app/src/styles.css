@@ -1188,3 +1188,11 @@ button:disabled {
 .auto-summary-label { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 13px; font-weight: 600; }
 .auto-summary-label input { width: 20px; height: 20px; accent-color: #111214; flex: none; }
 .auto-summary-setting .outline-button { margin-top: 8px; }
+
+/* Local AI uses the existing monochrome form and touch targets. */
+.auto-summary-setting { border-top-color: var(--lt-line); }
+.auto-summary-setting > .field-note { margin-top: 8px; }
+.auto-summary-setting .outline-button { min-height: 44px; height: auto; padding-top: 8px; padding-bottom: 8px; }
+.local-ai-progress { display: grid; gap: 8px; margin-top: 12px; color: var(--lt-muted); font-size: 14px; }
+.local-ai-progress progress { width: 100%; accent-color: var(--lt-ink); }
+.local-ai-progress .outline-button { justify-self: start; margin-top: 0; color: var(--lt-ink); }

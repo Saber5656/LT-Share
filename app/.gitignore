@@ -7,3 +7,4 @@ worker-dist/
 .env.local
 
 .e2e-dist/
+.local-ai-qa/

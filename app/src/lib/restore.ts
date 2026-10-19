@@ -16,7 +16,7 @@ export function restoreState(snapshot: StoredSnapshot, now = Date.now()): DraftS
 
   // A reload interrupts any running generation; show it as failed so it can be retried.
   const drafts: Draft[] = snapshot.drafts
-    .map((draft) => (draft.generation === "generating" ? { ...draft, generation: "failed" as const } : draft))
+    .map((draft) => (draft.generation === "generating" ? { ...draft, generation: "failed" as const, generationReplacesUserText: false } : draft))
     .sort((a, b) => a.index - b.index);
 
   const maxIndex = Math.max(...drafts.map((draft) => draft.index));

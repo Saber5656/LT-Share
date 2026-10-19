@@ -120,7 +120,7 @@ test("main flow: record, confirm the device save, post to X, move on, and surviv
 
   await expect(page.getByRole("heading", { name: "LT Share", level: 1, exact: true })).toBeVisible();
   await expect(page.getByText("1本目の投稿案")).toBeVisible();
-  // AI generation is not available in this version: no AI wording anywhere on the composer.
+  // Before explicit preparation, the composer must not claim an AI result.
   await expect(page.getByText(/ChatGPT|AIで生成/)).toHaveCount(0);
 
   // ① hashtags: several tags, normalization and case-insensitive de-duplication
@@ -349,7 +349,7 @@ test("次の投稿へ refuses an empty draft and media that is not confirmed sav
   await pickPhoto(page);
   await bodyBox(page).fill("本文");
   await next.click();
-  const toast = page.getByRole("status");
+  const toast = page.getByRole("status").filter({hasText:"まだ端末に保存されていません"});
   await expect(toast).toContainText("まだ端末に保存されていません");
   await expect(page.getByText("1本目の投稿案")).toBeVisible();
 
@@ -357,7 +357,7 @@ test("次の投稿へ refuses an empty draft and media that is not confirmed sav
   await toast.getByRole("button", { name: "端末に保存" }).click();
   await expect(askLine(page)).toBeVisible();
   await next.click();
-  await expect(page.getByRole("status")).toContainText("確認してください");
+  await expect(page.getByRole("status").filter({hasText:"確認してください"})).toBeVisible();
   await expect(page.getByText("1本目の投稿案")).toBeVisible();
 
   await page.getByRole("button", { name: "保存できた" }).click();
@@ -531,7 +531,7 @@ test("the first-run notice is shown once and can be reopened", async ({ page }) 
 
   await expect(page.getByRole("heading", { name: "データの扱い" })).toBeVisible();
   await expect(page.getByText("この端末（ブラウザ）に保存します", { exact: false })).toBeVisible();
-  await expect(page.getByText("サーバーは画像や投稿案を保存せず", { exact: false })).toBeVisible();
+  await expect(page.getByText("写真は外部へ送信せず端末内で処理します", { exact: false })).toBeVisible();
   await expect(page.getByText(/一切.*送信されない/)).toHaveCount(0);
 
   await page.getByRole("button", { name: "はじめる" }).click();
@@ -703,7 +703,7 @@ test("a write failure (e.g. storage full) is shown without losing anything, and 
 
   // FR-10: the draft is not stored, so the app does not move on and keeps it on screen.
   await page.getByRole("button", { name: "次の投稿へ" }).click();
-  await expect(page.getByRole("status")).toContainText("次へ進めません");
+  await expect(page.getByRole("status").filter({hasText:"次へ進めません"})).toBeVisible();
   await expect(page.getByText("1本目の投稿案")).toBeVisible();
   await expect(bodyBox(page)).toHaveValue("容量不足でも入力は消えない");
 

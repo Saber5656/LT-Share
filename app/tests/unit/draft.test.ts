@@ -320,3 +320,14 @@ test('clearing the field while generation waits is an edit and stays empty',()=>
   state=draftReducer(state,{type:'generateDone',draftId:'d3',text:'late result'});
   assert.equal(state.current.body,'');
 });
+
+test('cancelled regeneration preserves the original manual-text protection', () => {
+  let state = stateWithDraft({body:'残す手入力',bodySource:'user'});
+  const draftId = state.current.id;
+  state = draftReducer(state,{type:'generateStart',draftId,replaceUserText:true});
+  state = draftReducer(state,{type:'generateFailed',draftId,reason:'failed'});
+  assert.equal(state.current.bodySource,'user');
+  state = draftReducer(state,{type:'generateStart',draftId});
+  state = draftReducer(state,{type:'generateDone',draftId,text:'後続の自動生成'});
+  assert.equal(state.current.body,'残す手入力');
+});
