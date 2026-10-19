@@ -7,7 +7,7 @@ import {
   useState,
   type Dispatch,
 } from "react";
-import { useLocalAi, type LocalAiView } from "./useLocalAi.ts";
+import { useServerAi, type ServerAiView } from "./useServerAi.ts";
 import { sharePostWithMedia } from "../lib/deviceShare.ts";
 import {
   composeDraftPost,
@@ -46,8 +46,8 @@ export type App = {
   nav: Navigation;
   persistence: Persistence;
   aiEnabled: boolean;
-  localAiState: LocalAiView;
-  prepareAi: () => Promise<void>;
+  serverAiState: ServerAiView;
+  recheckAi: () => Promise<void>;
   cancelAi: () => void;
   autoSummary: boolean;
   setAutoSummary: (enabled: boolean) => void;
@@ -126,9 +126,9 @@ export function useController({
 
   const findDraft = useCallback((draftId: string | null) => findDraftIn(stateRef.current, draftId), []);
   const nav = useNavigation({ view: firstRun ? "welcome" : "composer" }, (id) => findDraft(id) !== null);
-  const local = useLocalAi();
-  const localRef = useRef(local);
-  useLayoutEffect(() => { localRef.current = local; }, [local]);
+  const server = useServerAi();
+  const serverRef = useRef(server);
+  useLayoutEffect(() => { serverRef.current = server; }, [server]);
   const [autoSummary, setAutoSummaryState] = useState(() => {
     try { return browserStorage()?.getItem("lt-share:auto-summary") !== "0"; } catch { return true; }
   });
@@ -136,7 +136,7 @@ export function useController({
     setAutoSummaryState(enabled);
     try { browserStorage()?.setItem("lt-share:auto-summary", enabled ? "1" : "0"); } catch { /* optional preference */ }
   }, []);
-  const aiEnabled = (local.state.phase === "ready" || local.state.phase === "generating") && autoSummary;
+  const aiEnabled = server.state.phase === "ready" && autoSummary;
   const autoSummaryRef = useRef(autoSummary);
   useLayoutEffect(() => { autoSummaryRef.current = autoSummary; }, [autoSummary]);
 
@@ -201,23 +201,27 @@ export function useController({
     if (ok) showToast("端末内（ブラウザ）に保存しました");
   }, [persistence, persist, showToast]);
 
-  /* ---------- Explicitly prepared on-device AI ---------- */
+  /* ---------- Server AI with cancellation and stale-result protection ---------- */
 
+  // Only fresh captures waiting on this visit’s status check may auto-send later.
+  // Never reconstruct this intent from persisted draft state.
+  const pendingAutoSummary = useRef<{draftId: string; mediaId: string} | null>(null);
   const generationEpoch = useRef(0);
   const activeTarget = useRef<{draftId: string; mediaId: string} | null>(null);
   useEffect(() => () => { generationEpoch.current++; }, []);
 
   const cancelAi = useCallback(() => {
+    pendingAutoSummary.current = null;
     generationEpoch.current++;
     const target = activeTarget.current;
     activeTarget.current = null;
     activeGenerations.current.clear();
-    localRef.current.cancel();
+    serverRef.current.cancel();
     if (target) dispatch({ type: "generateFailed", ...target, reason: "failed" });
   }, []);
 
   const generateDraft = useCallback(async (draft: Draft, replaceUserText = false, captured?: Blob) => {
-    if (localRef.current.state.phase !== "ready" || !draft.media || activeGenerations.current.size) return;
+    if (serverRef.current.state.phase !== "ready" || !draft.media || activeGenerations.current.size) return;
     const mediaId = draft.media.id;
     const draftId = draft.id;
     const epoch = generationEpoch.current;
@@ -237,7 +241,7 @@ export function useController({
         return;
       }
       if (!image) { guardedDispatch({type: "generateFailed", draftId, mediaId, reason: "failed"}); return; }
-      await runGeneration({provider: localRef.current.provider, draftId, mediaId, image, tags: draft.tags, dispatch: guardedDispatch, alreadyStarted: true});
+      await runGeneration({provider: serverRef.current.provider, draftId, mediaId, image, tags: draft.tags, dispatch: guardedDispatch, alreadyStarted: true});
     } finally {
       if (generationEpoch.current === epoch) {
         activeGenerations.current.delete(mediaId);
@@ -251,24 +255,27 @@ export function useController({
     if (draft) await generateDraft(draft, true);
   }, [generateDraft]);
 
-  const prepareAi = useCallback(async () => {
-    try { await localRef.current.prepare(); }
-    catch { /* The hook exposes preparation failures and cancellation in its state. */ }
+  const recheckAi = useCallback(async () => {
+    try { await serverRef.current.recheck(); }
+    catch { /* The hook exposes connection failures in its state. */ }
   }, []);
 
-  const previousPhase = useRef(local.state.phase);
   useEffect(() => {
-    const prepared = previousPhase.current === "loading" && local.state.phase === "ready";
-    previousPhase.current = local.state.phase;
-    if (!prepared || !autoSummaryRef.current || captureBusyRef.current) return;
+    if (server.state.phase === "checking" || captureBusyRef.current) return;
+    const pending = pendingAutoSummary.current;
+    pendingAutoSummary.current = null; // One opportunity, never an implicit retry.
+    if (!pending || server.state.phase !== "ready" || !autoSummaryRef.current) return;
     const draft = stateRef.current.current;
-    if (draft.media?.kind === "photo" && draft.bodySource !== "user") void generateDraft(draft);
-  }, [local.state.phase, generateDraft]);
+    if (draft.id === pending.draftId && draft.media?.id === pending.mediaId && draft.bodySource !== "user") {
+      void generateDraft(draft);
+    }
+  }, [server.state.phase, captureBusy, generateDraft]);
 
   /* ---------- recording (FR-02) ---------- */
 
   const captureFile = useCallback(
     async (file: File, fallbackKind: MediaKind) => {
+      cancelAi();
       const revision = ++captureRevision.current;
       const kind = kindOf(file, fallbackKind);
       const media: Media = {
@@ -299,8 +306,10 @@ export function useController({
         if (current.media) persistence.queueMediaDelete(current.media.id);
         dispatch({ type: "mediaCaptured", draftId: current.id, media });
         // Inference starts from the captured file, independently of the Photos save flow.
-        if (localRef.current.state.phase === "ready" && autoSummaryRef.current && current.bodySource !== "user") {
+        if (serverRef.current.state.phase === "ready" && autoSummaryRef.current && current.bodySource !== "user") {
           void generateDraft({ ...current, media }, false, file);
+        } else if (serverRef.current.state.phase === "checking" && autoSummaryRef.current && current.bodySource !== "user") {
+          pendingAutoSummary.current = {draftId: current.id, mediaId: media.id};
         }
       } finally {
         if (revision === captureRevision.current) {
@@ -309,7 +318,7 @@ export function useController({
         }
       }
     },
-    [persistence, generateDraft],
+    [persistence, generateDraft, cancelAi],
   );
 
   /* ---------- save to device (FR-03) ---------- */
@@ -478,8 +487,8 @@ export function useController({
     nav,
     persistence,
     aiEnabled,
-    localAiState: local.state,
-    prepareAi,
+    serverAiState: server.state,
+    recheckAi,
     cancelAi,
     autoSummary,
     setAutoSummary,

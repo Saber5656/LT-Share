@@ -8,3 +8,6 @@ worker-dist/
 
 .e2e-dist/
 .local-ai-qa/
+.wrangler/
+.dev.vars
+.dev.vars.*

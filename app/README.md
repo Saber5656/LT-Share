@@ -2,7 +2,7 @@
 
 A mobile-first web app for lightning-talk attendees: set the event hashtags once, record a photo or video of the talk, write the post, and hand it to X. The hashtags carry over to the next talk.
 
-The UI is built with Vite + React 19 + TypeScript and served by the existing Sites Worker. Photos, videos and drafts stay in the visitor's browser (IndexedDB). The current AI runs locally in a Web Worker; it does not call the legacy cloud API routes or require an API key or database. Requirements: [`../docs/requirements.md`](../docs/requirements.md). Screen design: [`../docs/DESIGN.md`](../docs/DESIGN.md). The clickable mock in [`../mock/`](../mock/) is the approved visual reference.
+The UI is built with Vite + React 19 + TypeScript and served by the existing Sites Worker. Photos, videos and drafts stay in the visitor's browser (IndexedDB). AI uses Cloudflare Workers AI through the authenticated Sites server. A resized image is sent for inference; originals and drafts remain in IndexedDB. No model download, end-user API key or server database is required. Requirements: [`../docs/requirements.md`](../docs/requirements.md). Screen design: [`../docs/DESIGN.md`](../docs/DESIGN.md). The clickable mock in [`../mock/`](../mock/) is the approved visual reference.
 
 ## Run, test, build
 
@@ -30,14 +30,14 @@ LT_E2E_PORT=4391 npm run test:e2e
 ### Hosting
 
 - The app is a static build: `npm run build` writes everything to `dist/`, and every asset URL is relative (`base: "./"` in `vite.config.ts`), so it does not depend on the URL it is served from.
-- `.openai/hosting.json` preserves the existing Site ID. `npm run build:worker` packages the UI in `dist/server/index.js` for Sites. The Site remains **private** (owner only). The model weights and pinned runtime are downloaded on explicit preparation, not embedded in the Worker bundle.
+- `.openai/hosting.json` preserves the existing Site ID. `npm run build:worker` packages the UI in `dist/server/index.js` for Sites. The Site remains **private** (owner only). The phone downloads only the web app. The separate Cloudflare Worker uses an AI binding; model weights are managed by Cloudflare.
 - **Check on a real device after publishing.** The following cannot be verified headlessly and must be tried on an iPhone (Safari) and an Android phone (Chrome), ideally also inside the X app's in-app browser: previews of photos and videos read back from the browser's storage (`blob:` URLs), the share sheet ("画像を保存" / "ビデオを保存" into the photo library), and the hand-off to the X app from "Xで開く" and "写真/動画付きで共有".
 
 ## How it behaves
 
 - **Record (FR-02):** a hidden `<input type="file" capture="environment">` per kind (`image/*` or `video/*`) opens the phone's camera UI. Cancelling the picker changes nothing. Re-recording replaces the draft's media; the copy in the phone's photo library is never touched.
 - **Save to device (FR-03):** browsers cannot write to the photo library silently. "端末に保存" opens the share sheet (iOS offers "画像を保存" / "ビデオを保存") when the browser can share files, otherwise it starts a download. Neither tells the page whether the user really saved the file, so the app asks "写真アプリ（ギャラリー）に保存できましたか？". Only "保存できた" marks the media as saved. A dismissed share sheet changes nothing; an error shows a retry and a download fallback.
-- **Post text (FR-05/06):** optional on-device photo summary plus an editable textarea with the X weighted counter (`X換算 n / 280`). See the local AI section below.
+- **Post text (FR-05/06):** server-side photo summary (automatic by default, switchable off) plus an editable textarea with the X weighted counter (`X換算 n / 280`). See the server AI section below.
 - **Developer label (FR-07):** "開発者：" is appended only while the toggle is on; it resets to off for the next post.
 - **ポスト確認 (FR-08/09):** shows the full text. On iPhone/iPad, "Xアプリで開く" requests the native composer using the `twitter:` scheme; Android uses a package-targeted Chrome Intent with a web fallback. Desktop keeps the HTTPS composer. App-link support must be verified on the target phone and X version. Mobile users can explicitly select "ブラウザ版で開く" or copy the full post text. No timer redirects the user after a launch attempt. "写真/動画付きで共有" uses Web Share with the file and text when supported. Sharing is disabled over the X limit. The app records "Xを開く操作済み", not verified app launch or posting success.
 - **次の投稿へ (FR-10):** stores the draft, carries over only the hashtags and starts an empty draft. It refuses an empty draft, media that is not confirmed as saved, and a draft that could not be written to browser storage.
@@ -60,7 +60,7 @@ LT_E2E_PORT=4391 npm run test:e2e
 | `src/lib/writerLock.ts` | Single-writer Web Lock |
 | `src/lib/saveFlow.ts`, `settle.ts` | The tap-synchronous "端末に保存" start and the escape for a share call that never settles |
 | `src/lib/storagePersist.ts` | One-time `navigator.storage.persist()` request |
-| `src/lib/ai.ts`, `generation.ts` | `AiProvider` interface and the generation runner; the controller uses the local provider |
+| `src/lib/ai.ts`, `generation.ts` | `AiProvider` interface and the generation runner; same-origin HTTP provider |
 | `src/app/` | Controller hook, context, in-app navigation (History API) |
 | `src/screens/`, `src/components/` | UI |
 | `tests/unit/` | Unit tests (reducer, share helper, repository with `fake-indexeddb`, restore, persistence) |
@@ -68,51 +68,29 @@ LT_E2E_PORT=4391 npm run test:e2e
 
 ## Not implemented / open
 
-- **Physical-phone local AI support is unverified.** WebGPU with `shader-f16` is required; availability alone does not guarantee enough memory or acceptable speed. Unsupported devices keep the manual flow. This implementation does not use ChatGPT subscription usage.
+- **Cloudflare connection and real-inference verification depend on deployment.** See the current verification record. This implementation does not consume the visitor’s ChatGPT subscription usage.
 - Draft deletion, retention limits and storage-size limits (U-04, U-05).
 - Not verified on real devices: the iOS/Android share sheet, "画像を保存" into the photo library, the X app hand-off, and video playback from stored blobs on iOS Safari. Browsers may also evict site data (for example Safari after a period without use); the app does not claim permanent storage.
 
-## Historical cloud prototype (2026-10-19; not used by the current UI)
+## Server AI (2026-10-20)
 
-写真を選ぶと、同じ画面で自動的に投稿文を作ります。自動作成はオフにでき、生成中も本文を編集できます。手入力や写真を消す操作は遅れて来た生成結果で上書きしません。別の写真の結果が現在の写真に混ざらないよう、写真IDでも対応付けます。
+写真を選ぶと同じ画面で投稿文を自動生成します。自動生成はOFFにでき、生成中も本文編集・中止ができます。途中の手入力・全消去、写真の交換は遅れた生成結果で上書きしません。動画は冒頭の静止画を使い、音声は要約しません。
 
-AIは運営側のGroq無料枠を使う接続口を実装しています。ChatGPTの契約枠やCodexを外部Webから使う方式とは別です。利用者にAPIキーやChatGPT内の操作を要求しません。実際の生成には運営用キーと無料プラン確認が必要です。未設定・上限時は手入力で進められます。
+`browser → Sites /api/summary → authenticated Cloudflare Worker → Workers AI`
 
-- Sites runtime secret: `GROQ_API_KEY`
-- Sites runtime configuration: `LT_AI_PROVIDER=groq`
-- 無料プラン確認後のみ: `LT_AI_FREE_TIER_CONFIRMED=true`
-
-無料プランであることはアプリが自動判定できません。カード登録/課金を有効にせず、実際の組織のLimitsを確認してください。APIの429で停止し、自動再試行・別モデル・別キーへの切替をしません。APIキーはブラウザに配布しません。サーバーに写真や下書きを保存するDBはありません。
+- 固定の画像対応モデル `@cf/qwen/qwen3.8-27b`。日本語約100文字、出力最大700トークン、応答最大140文字。写真を縮小して送り、ハッシュタグはモデルへ送信しません。
+- Sitesは利用者の認証・同一オリジン・実ボディサイズを検査。Cloudflareにはサーバー間専用の秘密値で接続します。Cloudflare側でも画像形式・サイズ・秘密値を検査します。
+- データベース、画像保存先、AI Gateway、プロンプトログを作りません。写真送信先を画面に明示します。
+- Workers **Free**アカウントでのみ無料枠利用を有効にする運用です。1日10,000 Neuronsはアカウント全体で共有します。超過時は生成停止、再試行・有料化・別モデルへの切替を自動実行しません。Paidアカウントでは超過課金されるため、単に確認フラグを立ててはいけません。
+- 中止は画面の待機とHTTPリクエストを止めます。受理済みのサーバー推論が完了する場合があります。
+- 詳細な配置手順・検証状態は [server-ai-cloudflare.md](../docs/server-ai-cloudflare.md)。
 
 ```sh
 npm run test:unit
 npm run test:server
 npm run test:e2e
 npm run build:worker
-npm run preview:worker -- --port 4395
+npx wrangler deploy --dry-run --config cloudflare/wrangler.jsonc
 ```
 
-`npm run build`はブラウザのみの確認用。`build:worker`はフロントを生成後、全アセットを埋め込んだWorkerを`dist/server/index.js`へ出力します。配布manifestは従来のSite IDを維持したWorker方式です。
-
-[構成と利用条件の比較](../docs/ai-delivery-options-20261019.md)。動画の生成は静止画に限り、音声要約ではありません。写真アプリへの自動保存・物理スマホの動作は未確認です。
-
-
-## 端末内AI（2026-10-20）
-
-「端末内AIを準備」を押したときだけ、Qwen3.5 0.8B の画像対応モデルを約0.9GB読み込みます。Wi-Fiを推奨します。準備後の写真取り込みは自動生成し、先に取り込んだ写真も未編集なら準備完了時に生成します。手入力・全消去後の本文は自動で上書きしません。作り直しは明示操作です。動画は冒頭の静止画だけを使い、音声を要約しません。
-
-- 初回にモデルと実行ライブラリをHugging Face/CDNから取得。写真・本文・タグは送信しません。
-- Cache APIに保存できたモデルは再利用します。再訪時は準備ボタンを再度押します。保存領域の削除・容量不足・ブラウザによる削除後は再取得が必要です。完全オフライン動作は保証しません。
-- Web Workerで処理し、準備・生成とも中止できます。中止するとWorker/GPU処理を終了し、下書きは残します。準備5分・生成2分でタイムアウトし、無制限に再試行しません。
-- 記録が読み取れない場合は失敗を表示し、手入力・再試行へ進めます。軽量モデルの出力は最終確認が必要です。100文字へ無理に水増ししません。
-- ChatGPT/Groq/Grokの契約・APIキー・従量課金を使用しません。クラウドへの自動切替はありません。
-
-実モデルを使う任意の試験（初回はモデルをダウンロードするため通常CIから分離）:
-
-```sh
-npm run dev -- --host 127.0.0.1 --port 4396
-# 別のターミナル。専用のChromeテストプロファイルを使用。
-node scripts/test-local-model.mjs
-```
-
-`.local-ai-qa/`に結果・専用キャッシュを保存し、Gitには含めません。モデル・runtimeの固定バージョンと制限は[検証記録](../docs/verification.md)に記載します。
+通常の`npm run dev`/`preview`は静的フロントのみでAI未接続です。E2Eのサーバー応答はテスト用です。実モデルの成功と混同しません。

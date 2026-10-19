@@ -1,141 +1,104 @@
-import {test,expect,type Page} from '@playwright/test';
+import {test,expect,type Page,type Route} from '@playwright/test';
 const image='tests/fixtures/lt-photo.jpg';
 const body=(page:Page)=>page.getByRole('textbox',{name:'投稿文',exact:true});
-async function start(page:Page,supported=true) {
-  await page.addInitScript(({supported})=>{
-    localStorage.setItem('lt-share:welcome-seen','1');
-    Object.defineProperty(navigator,'gpu',{configurable:true,value:{requestAdapter:async()=>supported?{features:new Set(['shader-f16'])}:null}});
-    const fixture={workers:[] as FakeWorker[],requests:[] as {type:string;id:number}[]};
-    class FakeWorker extends EventTarget {
-      terminated=false;
-      constructor(..._args:unknown[]) {super();fixture.workers.push(this);}
-      postMessage(request:{type:string;id:number}) {fixture.requests.push(request);}
-      terminate(){this.terminated=true;}
-    }
-    Object.assign(window,{Worker:FakeWorker,localAiFixture:fixture});
-  },{supported});
-  await page.goto('/');
-  await expect(page.getByLabel('写真から自動で投稿文をつくる')).toBeVisible();
+async function start(page:Page,available=true){
+ await page.addInitScript(()=>localStorage.setItem('lt-share:welcome-seen','1'));
+ await page.route('**/api/ai/status',r=>r.fulfill({json:{available,provider:'cloudflare',model:'vision'}}));
+ await page.goto('/');await expect(page.getByLabel('写真から自動で投稿文をつくる')).toBeVisible();
 }
-async function count(page:Page,type:string) {
-  return page.evaluate(type=>(window as any).localAiFixture.requests.filter((r:any)=>r.type===type).length,type);
-}
-async function reply(page:Page,data:Record<string,unknown>,workerIndex=-1) {
-  await page.evaluate(({data,workerIndex})=>{
-    const f=(window as any).localAiFixture;
-    const id=f.requests.at(-1).id;
-    f.workers.at(workerIndex).dispatchEvent(new MessageEvent('message',{data:{id,...data}}));
-  },{data,workerIndex});
-}
-async function prepare(page:Page) {
-  await page.getByRole('button',{name:'端末内AIを準備',exact:true}).click();
-  await expect.poll(()=>count(page,'load')).toBeGreaterThan(0);
-  await reply(page,{type:'loaded'});
-  await expect(page.getByText('端末内AIの準備ができました。',{exact:true})).toBeVisible();
-}
-test('no model or cloud requests before explicit prepare; progress and photo generation',async({page})=>{
-  const network:string[]=[];page.on('request',r=>{if(/\/api\/|huggingface|\.onnx|\.wasm/.test(r.url()))network.push(r.url());});
-  await start(page);await page.getByTestId('pick-photo').setInputFiles(image);
-  await expect(page.getByRole('img',{name:'記録した写真'})).toBeVisible();
-  expect(await count(page,'load')).toBe(0);expect(network).toEqual([]);
-  await page.getByRole('button',{name:'端末内AIを準備',exact:true}).click();
-  await reply(page,{type:'progress',progress:0.4});
-  await expect(page.getByRole('progressbar')).toHaveAttribute('value','0.4');
-  await expect(page.getByRole('button',{name:'準備を中止'})).toBeVisible();
-  await reply(page,{type:'loaded'});
-  await expect.poll(()=>count(page,'generate')).toBe(1);
-  await reply(page,{type:'result',text:'写真から端末内で作成した投稿文'});
-  await expect(body(page)).toHaveValue('写真から端末内で作成した投稿文');
-  expect(network).toEqual([]);
+test('automatic server summary without preparation or model downloads',async({page})=>{
+ const downloads:string[]=[];page.on('request',r=>{if(/huggingface|\.onnx|\.wasm/.test(r.url()))downloads.push(r.url());});
+ await page.route('**/api/summary',async r=>{expect(r.request().headers()['x-lt-share-request']).toBe('summary-v1');expect(r.request().headers()['content-type']).toContain('multipart/form-data');await r.fulfill({json:{text:'サーバーの要約'}});});
+ await start(page);await page.getByTestId('pick-photo').setInputFiles(image);await expect(body(page)).toHaveValue('サーバーの要約');expect(downloads).toEqual([]);await expect(page.getByText(/0.9GB|端末内AI|準備中/)).toHaveCount(0);
 });
-test('editing during generation survives response',async({page})=>{
-  await start(page);await prepare(page);await page.getByTestId('pick-photo').setInputFiles(image);
-  await expect.poll(()=>count(page,'generate')).toBe(1);
-  await body(page).fill('自分で書いた本文');await reply(page,{type:'result',text:'遅れた結果'});
-  await expect(page.getByRole('button',{name:'生成を中止'})).toBeHidden();
-  await expect(body(page)).toHaveValue('自分で書いた本文');
+for(const clear of [false,true])test(`editing survives late result clear=${clear}`,async({page})=>{
+ let pending:Route|undefined;await page.route('**/api/summary',r=>{pending=r;});await start(page);await page.getByTestId('pick-photo').setInputFiles(image);await expect.poll(()=>!!pending).toBe(true);await body(page).fill('自分の文章');if(clear)await body(page).fill('');await pending!.fulfill({json:{text:'遅い結果'}});await expect(page.getByRole('button',{name:'生成を中止'})).toBeHidden();await expect(body(page)).toHaveValue(clear?'':'自分の文章');
 });
-test('unsupported keeps manual input and photo without download',async({page})=>{
-  await start(page,false);await expect(page.getByText(/この端末では端末内AIを利用できません/)).toBeVisible();
-  await page.getByTestId('pick-photo').setInputFiles(image);await body(page).fill('手入力で続けます');
-  await expect(page.getByRole('img',{name:'記録した写真'})).toBeVisible();expect(await count(page,'load')).toBe(0);
-});
-test('cancel ignores late result and allows explicit preparation again',async({page})=>{
-  await start(page);await prepare(page);await page.getByTestId('pick-photo').setInputFiles(image);
-  await expect.poll(()=>count(page,'generate')).toBe(1);
-  await page.getByRole('button',{name:'生成を中止'}).click();
-  await reply(page,{type:'result',text:'中止後の結果'});
-  await expect(body(page)).toHaveValue('');
-  await expect(page.getByRole('button',{name:'端末内AIを準備',exact:true})).toBeVisible();
-  expect(await page.evaluate(()=>(window as any).localAiFixture.workers[0].terminated)).toBe(true);
-});
-test('reload does not automatically load and preserves preference',async({page})=>{
-  await start(page);await prepare(page);await page.getByLabel('写真から自動で投稿文をつくる').uncheck();
-  await page.reload();await expect(page.getByRole('button',{name:'端末内AIを準備',exact:true})).toBeVisible();
-  await expect(page.getByLabel('写真から自動で投稿文をつくる')).not.toBeChecked();
-  expect(await count(page,'load')).toBe(0);
-  await prepare(page);expect(await count(page,'load')).toBe(1);
-});
-for(const clear of [false,true]) test(`editing while preparing is preserved (clear=${clear})`,async({page})=>{
-  await start(page);await page.getByRole('button',{name:'端末内AIを準備',exact:true}).click();
-  await page.getByTestId('pick-photo').setInputFiles(image);
-  await body(page).fill('準備中に書いた本文');if(clear)await body(page).fill('');
-  await reply(page,{type:'loaded'});
-  await expect(page.getByText('端末内AIの準備ができました。',{exact:true})).toBeVisible();
-  await expect(body(page)).toHaveValue(clear?'':'準備中に書いた本文');expect(await count(page,'generate')).toBe(0);
-});
-test('ordinary failure allows retry without redownloading',async({page})=>{
-  await start(page);await prepare(page);await page.getByTestId('pick-photo').setInputFiles(image);
-  await expect.poll(()=>count(page,'generate')).toBe(1);await reply(page,{type:'error',code:'unreadable'});
-  await expect(page.getByText('投稿文を作成できませんでした。記録はそのまま残っています。')).toBeVisible();
-  await page.getByRole('button',{name:'再試行',exact:true}).click();await expect.poll(()=>count(page,'generate')).toBe(2);
-  await reply(page,{type:'result',text:'再試行の結果'});await expect(body(page)).toHaveValue('再試行の結果');expect(await count(page,'load')).toBe(1);
-});
-test('next photo during generation is retained and can be generated manually',async({page})=>{
-  await start(page);await prepare(page);await page.getByTestId('pick-photo').setInputFiles(image);
-  await expect.poll(()=>count(page,'generate')).toBe(1);
-  await page.getByTestId('pick-photo').setInputFiles({name:'next.jpg',mimeType:'image/jpeg',buffer:await (await import('node:fs/promises')).readFile(image)});
-  await expect(page.getByRole('img',{name:'記録した写真'})).toBeVisible();
-  await reply(page,{type:'result',text:'古い写真の結果'});
-  await expect(page.getByText('端末内AIの準備ができました。',{exact:true})).toBeVisible();
-  await expect(body(page)).toHaveValue('');expect(await count(page,'generate')).toBe(1);
-  await page.getByRole('button',{name:'投稿文をつくる',exact:true}).click();await expect.poll(()=>count(page,'generate')).toBe(2);
-  await reply(page,{type:'result',text:'新しい写真の結果'});await expect(body(page)).toHaveValue('新しい写真の結果');
-});
-test('explicit regeneration can replace existing user text',async({page})=>{
-  await start(page);await prepare(page);await body(page).fill('元の手入力');
-  await page.getByTestId('pick-photo').setInputFiles(image);
-  await page.getByRole('button',{name:'投稿文を作り直す'}).click();
-  await expect.poll(()=>count(page,'generate')).toBe(1);
-  await reply(page,{type:'result',text:'明示的に作り直した本文'});
-  await expect(body(page)).toHaveValue('明示的に作り直した本文');
-});
-test('preparation cancel and failure permit explicit retry',async({page})=>{
-  await start(page);await page.getByRole('button',{name:'端末内AIを準備',exact:true}).click();
-  await page.getByRole('button',{name:'準備を中止'}).click();await reply(page,{type:'loaded'});
-  await page.getByRole('button',{name:'端末内AIを準備',exact:true}).click();
-  await reply(page,{type:'error',code:'failed'});
-  await expect(page.getByText(/端末内AIを利用できませんでした/)).toBeVisible();
-  await prepare(page);expect(await count(page,'load')).toBe(3);
-});
-test('preparation completion uses latest media and opt-out suppresses auto generation',async({page})=>{
-  await start(page);await page.getByRole('button',{name:'端末内AIを準備',exact:true}).click();
-  await page.getByTestId('pick-photo').setInputFiles(image);
-  await page.getByTestId('pick-photo').setInputFiles({name:'latest.jpg',mimeType:'image/jpeg',buffer:await (await import('node:fs/promises')).readFile(image)});
-  await reply(page,{type:'loaded'});await expect.poll(()=>count(page,'generate')).toBe(1);
-  await reply(page,{type:'result',text:'最新写真の本文'});await expect(body(page)).toHaveValue('最新写真の本文');
-  await page.getByLabel('写真から自動で投稿文をつくる').uncheck();
-  await page.getByTestId('pick-photo').setInputFiles(image);
-  await expect(page.getByRole('img',{name:'記録した写真'})).toBeVisible();expect(await count(page,'generate')).toBe(1);
-});
+test('unavailable remains manual and connection can be rechecked',async({page})=>{await start(page,false);await expect(page.getByText(/サーバー要約を利用できません/)).toBeVisible();await body(page).fill('手入力');await page.route('**/api/ai/status',r=>r.fulfill({json:{available:true,provider:'cloudflare',model:'vision'}}));await page.getByRole('button',{name:'接続を再確認'}).click();await expect(page.getByText('要約サーバーに接続しました。',{exact:true})).toBeVisible();await expect(body(page)).toHaveValue('手入力');});
+test('cancel ignores response and explicit retry needs no preparation',async({page})=>{let pending:Route|undefined;await page.route('**/api/summary',r=>{pending=r;});await start(page);await page.getByTestId('pick-photo').setInputFiles(image);await expect.poll(()=>!!pending).toBe(true);await page.getByRole('button',{name:'生成を中止'}).click();await pending!.fulfill({json:{text:'中止後'}}).catch(()=>{});await expect(body(page)).toHaveValue('');await page.route('**/api/summary',r=>r.fulfill({json:{text:'再試行'}}));await page.getByRole('button',{name:'投稿文をつくる',exact:true}).click();await expect(body(page)).toHaveValue('再試行');});
+test('opt out persists and suppresses automatic upload',async({page})=>{let requests=0;await page.route('**/api/summary',r=>{requests++;return r.fulfill({json:{text:'要約'}});});await start(page);await page.getByLabel('写真から自動で投稿文をつくる').uncheck();await page.reload();await expect(page.getByLabel('写真から自動で投稿文をつくる')).not.toBeChecked();await page.getByTestId('pick-photo').setInputFiles(image);await expect(page.getByRole('img',{name:'記録した写真'})).toBeVisible();expect(requests).toBe(0);});
+test('new photo cannot receive old result',async({page})=>{const pending:Route[]=[];await page.route('**/api/summary',r=>{pending.push(r);});await start(page);await page.getByTestId('pick-photo').setInputFiles(image);await expect.poll(()=>pending.length).toBe(1);await page.getByTestId('pick-photo').setInputFiles(image);await expect.poll(()=>pending.length).toBe(2);await pending[0]!.fulfill({json:{text:'古い写真'}}).catch(()=>{});await pending[1]!.fulfill({json:{text:'新しい写真'}});await expect(body(page)).toHaveValue('新しい写真');});
+test('explicit regeneration replaces user text',async({page})=>{await page.route('**/api/summary',r=>r.fulfill({json:{text:'作り直した本文'}}));await start(page);await body(page).fill('元の本文');await page.getByTestId('pick-photo').setInputFiles(image);await page.getByRole('button',{name:'投稿文を作り直す'}).click();await expect(body(page)).toHaveValue('作り直した本文');});
+for(const status of [422,429,503])test(`server ${status} keeps image and manual entry`,async({page})=>{await page.route('**/api/summary',r=>r.fulfill({status,json:{error:'failed'}}));await start(page);await page.getByTestId('pick-photo').setInputFiles(image);await expect(page.getByRole('alert')).toBeVisible();await body(page).fill('手入力で続ける');await expect(page.getByRole('img',{name:'記録した写真'})).toBeVisible();});
 
-test('cancelled manual replacement stays protected after model preparation',async({page})=>{
-  await start(page);await prepare(page);await body(page).fill('中止後も残す手入力');
-  await page.getByTestId('pick-photo').setInputFiles(image);
-  await page.getByRole('button',{name:'投稿文を作り直す'}).click();
-  await expect.poll(()=>count(page,'generate')).toBe(1);
-  await page.getByRole('button',{name:'生成を中止'}).click();
-  await prepare(page);
-  await expect(body(page)).toHaveValue('中止後も残す手入力');
-  expect(await count(page,'generate')).toBe(1);
+for (const status of [200, 422, 429]) {
+ for (const action of ['reload', 'recheck'] as const) {
+  test(`saved summary is not resent on ${action} status=${status}`, async ({page}) => {
+   let requests=0;
+   await page.route('**/api/summary', r => { requests++; return r.fulfill({status,json:{text:requests===1?'保存する本文':'意図しない再生成'}}); });
+   await start(page);
+   await page.getByTestId('pick-photo').setInputFiles(image);
+   await expect.poll(()=>requests).toBe(1);
+   if(status===200) await expect(body(page)).toHaveValue('保存する本文');
+   else await expect(page.getByRole('alert')).toBeVisible();
+   // The controller persists edits after 250ms; allow that write before reload.
+   await page.waitForTimeout(500);
+   if(action==='reload') await page.reload();
+   else await page.getByRole('button',{name:'接続を再確認'}).click();
+   await expect(page.getByRole('button',{name:'接続を再確認'})).toBeVisible();
+   await expect(page.getByRole('img',{name:'記録した写真'})).toBeVisible();
+   await page.waitForTimeout(300);
+   expect(requests).toBe(1);
+   await expect(body(page)).toHaveValue(status===200?'保存する本文':'');
+  });
+ }
+}
+for (const edit of ['none','clear','off','replace'] as const) {
+ test(`new photo waits for pending connection only: ${edit}`,async({page})=>{
+  let statusRoute:Route|undefined;let requests=0;
+  await page.addInitScript(()=>localStorage.setItem('lt-share:welcome-seen','1'));
+  await page.route('**/api/ai/status',r=>{statusRoute=r;});
+  await page.route('**/api/summary',r=>{requests++;return r.fulfill({json:{text:'新規写真の本文'}});});
+  await page.goto('/');await page.getByTestId('pick-photo').setInputFiles(image);
+  await expect(page.getByRole('img',{name:'記録した写真'})).toBeVisible();
+  if(edit==='clear'){await body(page).fill('書いて消す');await body(page).fill('');}
+  if(edit==='off')await page.getByLabel('写真から自動で投稿文をつくる').uncheck();
+  if(edit==='replace')await page.getByTestId('pick-photo').setInputFiles(image);
+  await expect.poll(()=>!!statusRoute).toBe(true);
+  await statusRoute!.fulfill({json:{available:true,provider:'cloudflare',model:'vision'}});
+  await expect(page.getByRole('button',{name:'接続を再確認'})).toBeVisible();
+  if(edit==='none'||edit==='replace'){await expect(body(page)).toHaveValue('新規写真の本文');expect(requests).toBe(1);}
+  else {await page.waitForTimeout(300);expect(requests).toBe(0);await expect(body(page)).toHaveValue('');}
+ });
+}
+
+test('new video waits for pending connection and uploads a still image once',async({page})=>{
+ let statusRoute:Route|undefined;let requests=0;
+ await page.addInitScript(()=>localStorage.setItem('lt-share:welcome-seen','1'));
+ await page.route('**/api/ai/status',r=>{statusRoute=r;});
+ await page.route('**/api/summary',r=>{
+  requests++;
+  expect(r.request().postDataBuffer()?.toString()).toContain('Content-Type: image/jpeg');
+  return r.fulfill({json:{text:'動画の静止画からの本文'}});
+ });
+ await page.goto('/');
+ // Produce a decodable video in the browser; no fake video or inference mock.
+ const bytes=await page.evaluate(async()=>{
+  const canvas=document.createElement('canvas');canvas.width=160;canvas.height=90;
+  const context=canvas.getContext('2d')!;
+  const stream=canvas.captureStream(10);
+  const recorder=new MediaRecorder(stream,{mimeType:'video/webm'});
+  const chunks:Blob[]=[];
+  recorder.ondataavailable=event=>chunks.push(event.data);
+  const stopped=new Promise<void>(resolve=>{recorder.onstop=()=>resolve();});
+  recorder.start();
+  context.fillStyle='white';context.fillRect(0,0,160,90);
+  await new Promise(resolve=>setTimeout(resolve,150));
+  context.fillStyle='black';context.fillText('LT video',10,40);
+  await new Promise(resolve=>setTimeout(resolve,150));
+  recorder.stop();await stopped;stream.getTracks().forEach(track=>track.stop());
+  return Array.from(new Uint8Array(await new Blob(chunks,{type:'video/webm'}).arrayBuffer()));
+ });
+ await page.getByTestId('pick-video').setInputFiles({name:'talk.webm',mimeType:'video/webm',buffer:Buffer.from(bytes)});
+ await expect(page.locator('.media-frame video')).toBeVisible();
+ await expect.poll(()=>!!statusRoute).toBe(true);
+ await statusRoute!.fulfill({json:{available:true,provider:'cloudflare',model:'vision'}});
+ await expect(body(page)).toHaveValue('動画の静止画からの本文');expect(requests).toBe(1);
+ statusRoute=undefined;
+ await page.getByRole('button',{name:'接続を再確認'}).click();
+ await expect.poll(()=>!!statusRoute).toBe(true);
+ await page.unroute('**/api/ai/status');
+ await statusRoute!.fulfill({json:{available:true,provider:'cloudflare',model:'vision'}});
+ await expect(page.getByText('要約サーバーに接続しました。',{exact:true})).toBeVisible();
+ await page.waitForTimeout(300);expect(requests).toBe(1);
 });
