@@ -1,14 +1,14 @@
 // Draft state for LT Share. Pure logic only: no DOM, storage or network.
 // Ported from the approved screen mock (mock/src/lib/draft.ts) and extended with
-// the device-save confirmation flow (FR-03) and persistence-friendly fields (6.2).
+// legacy device-export states and persistence-friendly fields (6.2).
 
 export type MediaKind = "photo" | "video";
 
 // "unsaved"    held in the app; existence of a device original is unconfirmed
-// "confirming" a share sheet / download was handed off; waiting for the user to confirm
+// "confirming" legacy name: an export was handed off; no confirmation is requested
 // "saved"      the user confirmed the file is in the photo library / gallery
 // "failed"     the share/download call threw; retry or fall back to a download
-// "saved" is only ever reached through the user's confirmation (FR-03).
+// Legacy confirmations remain readable for old drafts; new UI does not request them.
 export type SaveStatus = "unsaved" | "confirming" | "saved" | "failed";
 export type Generation = "idle" | "generating" | "done" | "failed" | "quota";
 export type BodySource = "none" | "ai" | "user";
@@ -146,7 +146,7 @@ export function composePost({
   tags: string[];
   includeDeveloper: boolean;
 }): string {
-  return [body.trim(), tags.join(" "), includeDeveloper ? DEVELOPER_LABEL : ""]
+  return [body.trim(), includeDeveloper ? DEVELOPER_LABEL : "", tags.join(" ")]
     .filter((part) => part.length > 0)
     .join("\n\n");
 }
@@ -218,21 +218,12 @@ export function isEmptyDraft(draft: Draft): boolean {
   return draft.media === null && draft.body.trim().length === 0;
 }
 
-export type NextDraftBlocker = "empty" | "media-unsaved" | "media-confirming" | "media-failed";
+export type NextDraftBlocker = "empty";
 
-// FR-10 / NFR-02: never leave a draft whose media is not confirmed on the device.
+// Device-save status is retained for legacy persistence, but does not block moving on.
+// Capture and storage writes are protected by the app controller.
 export function nextDraftBlocker(draft: Draft): NextDraftBlocker | null {
-  if (isEmptyDraft(draft)) return "empty";
-  switch (draft.media?.saveStatus) {
-    case "unsaved":
-      return "media-unsaved";
-    case "confirming":
-      return "media-confirming";
-    case "failed":
-      return "media-failed";
-    default:
-      return null;
-  }
+  return isEmptyDraft(draft) ? "empty" : null;
 }
 
 export function canMoveToNextDraft(draft: Draft): boolean {
@@ -250,9 +241,15 @@ export function draftReducer(state: DraftState, action: DraftAction): DraftState
       };
     case "mediaCaptured":
       if (state.current.id !== action.draftId) return state;
-      // A new recording replaces the previous one. The body stays: text the user
-      // wrote is never discarded (NFR-02).
-      return { ...state, current: { ...state.current, media: action.media, generation: "idle", generationReplacesUserText: false } };
+      // A replacement never deletes the only copy made by the in-app camera.
+      // Keep the previous variant in history without another confirmation step.
+      return {
+        ...state,
+        history: state.current.media && state.current.media.id !== action.media.id
+          ? [...state.history, { ...state.current, id: `${state.current.id}:media:${state.current.media.id}`, generation: state.current.generation === "generating" ? "idle" : state.current.generation }]
+          : state.history,
+        current: { ...state.current, media: action.media, generation: "idle", generationReplacesUserText: false },
+      };
     case "saveHandedOff":
       return updateMediaStatus(state, action.draftId, action.mediaId, (status) =>
         status === "saved" ? status : "confirming",
@@ -297,6 +294,7 @@ export function draftReducer(state: DraftState, action: DraftAction): DraftState
         tags: state.current.tags,
         now: action.now,
       });
+      next.includeDeveloper = state.current.includeDeveloper;
       return { current: next, history: [...state.history, state.current], nextId: state.nextId + 1 };
     }
   }

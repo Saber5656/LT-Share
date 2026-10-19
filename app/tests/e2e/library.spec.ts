@@ -31,6 +31,7 @@ async function openLibrary(page: Page): Promise<FileChooser> {
   await libraryButton(page).click();
   const chooser = await opened;
   expect(await chooser.element().getAttribute('data-testid')).toBe('pick-library');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   return chooser;
 }
 
@@ -94,11 +95,10 @@ test('library photo previews and automatically summarizes without confirming ori
   const requests = await start(page);
   await choosePhoto(page);
   await expect(body(page)).toHaveValue('ライブラリ要約1');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(requests).toHaveLength(1);
   expect(requests[0]!.toString()).toContain('Content-Type: image/jpeg');
   expect(await page.getByRole('img',{name:'記録した写真'}).evaluate((image:HTMLImageElement)=>image.naturalWidth)).toBeGreaterThan(0);
-  await expect(page.getByRole('button',{name:'元のファイルが端末にある',exact:true})).toBeVisible();
-  await expect(page.getByText('端末に保存済み',{exact:true})).toHaveCount(0);
 });
 
 test('library video decodes, previews and uploads only a JPEG still for summary', async ({page}) => {
@@ -109,6 +109,7 @@ test('library video decodes, previews and uploads only a JPEG still for summary'
   await expect(preview).toBeVisible();
   await expect.poll(()=>preview.evaluate((element:HTMLVideoElement)=>element.videoWidth)).toBeGreaterThan(0);
   await expect(body(page)).toHaveValue('ライブラリ要約1');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(requests).toHaveLength(1);
   expect(requests[0]!.toString()).toContain('Content-Type: image/jpeg');
   expect(requests[0]!.toString()).not.toContain('Content-Type: video/webm');
@@ -118,7 +119,6 @@ test('cancelling library picker preserves body tags and existing media', async (
   const requests=await start(page);
   await choosePhoto(page);
   await expect(body(page)).toHaveValue('ライブラリ要約1');
-  await page.getByRole('button',{name:'元のファイルが端末にある',exact:true}).click();
   await body(page).fill('手入力を残す');
   await page.getByLabel('ハッシュタグを追加').fill('Keep');
   await page.getByLabel('ハッシュタグを追加').press('Enter');
@@ -129,65 +129,47 @@ test('cancelling library picker preserves body tags and existing media', async (
   await expect(body(page)).toHaveValue('手入力を残す');
   await expect(page.locator('.tag-chip')).toHaveText(['#Keep']);
   await expect(page.getByRole('img',{name:'記録した写真'})).toHaveAttribute('src',previousUrl!);
-  await expect(page.getByText('端末に保存済み',{exact:true})).toBeVisible();
   expect(requests).toHaveLength(1);
 });
 
-test('unsaved replacement confirms and opens library rather than camera', async ({page}) => {
+test('library replacement opens directly and summarizes the new selection', async ({page}) => {
   const requests=await start(page);
   await page.getByTestId('pick-photo').setInputFiles(PHOTO);
   await expect(body(page)).toHaveValue('ライブラリ要約1');
-  let opened=0;
-  page.on('filechooser',()=>opened++);
-  await libraryButton(page).click();
-  const dialog=page.getByRole('dialog',{name:'記録を置き換えますか？'});
-  await expect(dialog).toBeVisible();
-  expect(opened).toBe(0);
-  const chooserPromise=page.waitForEvent('filechooser');
-  await dialog.getByRole('button',{name:'選び直す',exact:true}).click();
-  const chooser=await chooserPromise;
-  expect(await chooser.element().getAttribute('data-testid')).toBe('pick-library');
+  const chooser=await openLibrary(page);
   expect(await chooser.element().getAttribute('capture')).toBeNull();
   await chooser.setFiles(PHOTO);
   await expect(body(page)).toHaveValue('ライブラリ要約2');
   expect(requests).toHaveLength(2);
-  await expect(page.getByRole('button',{name:'元のファイルが端末にある',exact:true})).toBeVisible();
 });
 
-test('same library file can be selected again after original is confirmed', async ({page}) => {
+test('same library file can be selected again without confirmation', async ({page}) => {
   const requests=await start(page);
   await choosePhoto(page);
   await expect(body(page)).toHaveValue('ライブラリ要約1');
-  await page.getByRole('button',{name:'元のファイルが端末にある',exact:true}).click();
-  await expect(page.getByText('端末に保存済み',{exact:true})).toBeVisible();
   await choosePhoto(page);
   await expect(body(page)).toHaveValue('ライブラリ要約2');
   expect(requests).toHaveLength(2);
-  await expect(page.getByRole('button',{name:'元のファイルが端末にある',exact:true})).toBeVisible();
-  await expect(page.getByText('端末に保存済み',{exact:true})).toHaveCount(0);
 });
 
-test('original confirmation uses no share or download and saved state survives reload', async ({page}) => {
+test('library import uses no share or download and the original survives reload', async ({page}) => {
   const requests=await start(page);
   let downloads=0; page.on('download',()=>downloads++);
   await choosePhoto(page);
   await expect(body(page)).toHaveValue('ライブラリ要約1');
-  await page.getByRole('button',{name:'元のファイルが端末にある',exact:true}).click();
-  await expect(page.getByText('端末に保存済み',{exact:true})).toBeVisible();
   expect(await page.evaluate(()=>(window as unknown as {libraryShareCalls:number}).libraryShareCalls)).toBe(0);
   expect(downloads).toBe(0);
   // Wait past the controller's 250ms persistence debounce before restoring the page.
   await page.waitForTimeout(500);
   await page.reload();
-  await expect(page.getByText('端末に保存済み',{exact:true})).toBeVisible();
   await expect(page.getByRole('img',{name:'記録した写真'})).toBeVisible();
   await expect(body(page)).toHaveValue('ライブラリ要約1');
-  await expect(page.getByRole('button',{name:'元のファイルが端末にある',exact:true})).toHaveCount(0);
+  await expect(page.getByRole('dialog')).toHaveCount(0);
   expect(requests).toHaveLength(1);
   await captureAfter(page, 'saved-photo');
 });
 
-test('unconfirmed library original asks for confirmation in post sheet and next flow', async ({page}) => {
+test('library original can be posted and archived without a save confirmation', async ({page}) => {
   await start(page);
   await page.getByLabel('ハッシュタグを追加').fill('LibraryLT');
   await page.getByLabel('ハッシュタグを追加').press('Enter');
@@ -196,17 +178,8 @@ test('unconfirmed library original asks for confirmation in post sheet and next 
   await page.getByRole('button',{name:'ポスト確認',exact:true}).click();
   const dialog=page.getByRole('dialog',{name:'ポスト確認',exact:true});
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText(/原本が端末にあるか確認してください/)).toBeVisible();
-  await expect(dialog.getByText(/まだ端末に保存/)).toHaveCount(0);
   await dialog.getByRole('button',{name:'閉じる',exact:true}).click();
   await expect(dialog).toBeHidden();
-  await page.getByRole('button',{name:'次の投稿へ',exact:true}).click();
-  await expect(page.getByText(/原本が端末にあるか/)).toBeVisible();
-  await expect(page.getByText('1本目の投稿案',{exact:true})).toBeVisible();
-  await expect(page.getByText('2本目の投稿案',{exact:true})).toHaveCount(0);
-  await expect(body(page)).toHaveValue('ライブラリ要約1');
-  await page.getByRole('button',{name:'元のファイルが端末にある',exact:true}).click();
-  await expect(page.getByText('端末に保存済み',{exact:true})).toBeVisible();
   await page.getByRole('button',{name:'次の投稿へ',exact:true}).click();
   await expect(page.getByText('2本目の投稿案',{exact:true})).toBeVisible();
   await expect(page.locator('.tag-chip')).toHaveText(['#LibraryLT']);

@@ -430,3 +430,62 @@ test("peekMedia is synchronous for blobs held in memory; getMedia can remember a
   const blob = await persistence.getMedia("m1", { remember: true });
   assert.equal(persistence.peekMedia("m1"), blob);
 });
+
+test("memory-only originals survive nextDraft and cache eviction while history references them", async () => {
+  const persistence = new Persistence(null);
+  const original = new Blob(["only original"], { type: "image/jpeg" });
+  await persistence.putMedia("m1", original);
+  const state = draftReducer(stateOf({ media: media("m1") }), { type: "nextDraft" });
+  assert.equal(state.history[0]?.media?.id, "m1");
+
+  persistence.retainMedia([]);
+  assert.equal(await persistence.getMedia("m1"), original);
+  assert.deepEqual([...persistence.unpersistedMediaIds], ["m1"]);
+  assert.equal(await persistence.retryUnpersistedMedia(), false);
+  assert.equal((await persistence.flush(state)).ok, false);
+  persistence.retainMedia([]);
+  assert.equal(persistence.peekMedia("m1"), original);
+});
+
+test("memory-only deletion releases an original only after no current or historical draft references it", async () => {
+  const persistence = new Persistence(null);
+  const original = new Blob(["old"]);
+  await persistence.putMedia("old", original);
+  await persistence.putMedia("new", new Blob(["new"]));
+  persistence.queueMediaDelete("old");
+  const before = stateOf({ media: media("old") });
+  await persistence.flush(before);
+  assert.equal(persistence.peekMedia("old"), original);
+
+  const state = draftReducer(before, { type: "nextDraft" });
+  state.current.media = media("new");
+  await persistence.flush(state);
+  assert.equal(persistence.peekMedia("old"), original);
+
+  assert.equal((await persistence.flush({ ...state, history: [] })).ok, false);
+  assert.equal(persistence.peekMedia("old"), undefined);
+  assert.equal(await persistence.getMedia("old"), null);
+  assert.equal(persistence.unpersistedMediaIds.has("old"), false);
+  persistence.retainMedia([]);
+  assert.equal(await (await persistence.getMedia("new"))?.text(), "new");
+
+  // A completed deletion must not remain queued and delete a later reuse of the id.
+  await persistence.putMedia("old", original);
+  await persistence.flush({ ...state, history: [] });
+  assert.equal(persistence.peekMedia("old"), original);
+});
+
+test("read-only media stays in memory without writing or deleting repository blobs", async () => {
+  const spy = spyRepo(createIndexedDbRepository(new IDBFactory()));
+  const persistence = new Persistence(spy.repo, Date.now, { readOnly: true });
+  const original = new Blob(["memory only"]);
+  await persistence.putMedia("m1", original);
+  persistence.retainMedia([]);
+  assert.equal(persistence.peekMedia("m1"), original);
+  assert.equal(await persistence.retryUnpersistedMedia(), false);
+  persistence.queueMediaDelete("m1");
+  await persistence.flush(stateOf());
+  assert.equal(persistence.peekMedia("m1"), original);
+  assert.deepEqual(spy.deletedMedia, []);
+  assert.equal(await spy.repo.getMedia("m1"), null);
+});

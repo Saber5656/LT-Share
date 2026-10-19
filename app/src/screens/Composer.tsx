@@ -10,7 +10,8 @@ import {
 } from "@phosphor-icons/react";
 import { useApp } from "../app/context.ts";
 import { useMedia } from "../app/useMedia.ts";
-import { Footer, PostCounter, Sheet, Step, ComposerHeader } from "../components/chrome.tsx";
+import { Footer, PostCounter, Step, ComposerHeader } from "../components/chrome.tsx";
+import { CameraCapture } from "../components/CameraCapture.tsx";
 import { DeviceSaveStatus, MediaFrame, mediaNoun } from "../components/media.tsx";
 import { composeDraftPost, xWeightedLength, type MediaKind } from "../lib/draft.ts";
 
@@ -55,12 +56,12 @@ export function Composer() {
           number={4}
           title="開発者をポストに含める"
           titleId="step-developer-title"
-          helper="ONで本文末尾に「開発者：」を追加"
+          helper="ONでハッシュタグの前に「開発者：」を追加"
           action={<DeveloperToggle />}
         />
       </main>
       {picker.inputs}
-      {picker.confirmDialog}
+      {picker.camera}
       <ComposerFooter />
     </>
   );
@@ -137,56 +138,18 @@ function TagField() {
 
 const PICKER_ACCEPT = { photo: "image/*", video: "video/*" } as const;
 
-// Camera inputs keep capture; the separate library input lets the OS offer Photos.
-// Choosing nothing leaves the draft untouched, including after replacement approval.
+// Keep native input compatibility, but use a visible live camera for recording.
 function useRecordPicker() {
-  const { state, captureKind, captureFile } = useApp();
+  const { captureKind, captureFile } = useApp();
   const inputs = { photo: useRef<HTMLInputElement>(null), video: useRef<HTMLInputElement>(null), library: useRef<HTMLInputElement>(null) };
-  const media = state.current.media;
-  const [pendingPicker, setPendingPicker] = useState<MediaKind | "library" | null>(null);
-  const fromLibrary = pendingPicker === "library";
-
-  // The picker has to be opened straight from a tap (user activation), so both the
-  // direct path and the confirmation button call this synchronously.
-  const openFilePicker = (target: MediaKind | "library") => inputs[target].current?.click();
-
-  const open = (target: MediaKind | "library") => {
-    // Re-recording replaces what the draft holds. If the old file never reached the
-    // device, make sure the user means it (NFR-02). This is an in-app dialog, not
-    // window.confirm: in-app browsers (such as the X app's WebView) may suppress that.
-    if (media && media.saveStatus !== "saved") {
-      setPendingPicker(target);
-      return;
-    }
-    openFilePicker(target);
-  };
-
-  const confirmDialog = (
-    <Sheet
-      open={pendingPicker !== null}
-      onClose={() => setPendingPicker(null)}
-      title={fromLibrary ? "記録を置き換えますか？" : "撮り直しますか？"}
-      description={`いまの${media ? mediaNoun(media.kind) : "記録"}は端末に保存済みか確認できていません。${fromLibrary ? "選び直す" : "撮り直す"}と、アプリ内のこの記録は置き換わります（端末の写真アプリに保存済みのものは消えません）。`}
-    >
-      <div className="sheet-actions">
-        <button
-          type="button"
-          className="primary-button"
-          onClick={() => {
-            if (pendingPicker === null) return;
-            const target = pendingPicker;
-            setPendingPicker(null);
-            openFilePicker(target);
-          }}
-        >
-          {fromLibrary ? "選び直す" : "撮り直す"}
-        </button>
-        <button type="button" className="text-button" onClick={() => setPendingPicker(null)}>
-          やめる
-        </button>
-      </div>
-    </Sheet>
-  );
+  const [cameraKind, setCameraKind] = useState<MediaKind | null>(null);
+  const openLibrary = () => inputs.library.current?.click();
+  const camera = cameraKind ? <CameraCapture
+    kind={cameraKind}
+    onClose={() => setCameraKind(null)}
+    onFile={file => { setCameraKind(null); void captureFile(file, cameraKind); }}
+    onLibrary={() => { openLibrary(); setCameraKind(null); }}
+  /> : null;
 
   const onPicked = (kind: MediaKind, source?: "library") => (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -210,8 +173,8 @@ function useRecordPicker() {
   ));
 
   return {
-    open: () => open(captureKind),
-    openLibrary: () => open("library"),
+    open: () => setCameraKind(captureKind),
+    openLibrary,
     inputs: <>{hidden}<input
       ref={inputs.library}
       className="visually-hidden"
@@ -222,7 +185,7 @@ function useRecordPicker() {
       data-testid="pick-library"
       onChange={onPicked("photo", "library")}
     /></>,
-    confirmDialog,
+    camera,
   };
 }
 
@@ -285,7 +248,7 @@ function MediaBlock({ openPicker }: { openPicker: () => void }) {
           <CameraIcon size={28} aria-hidden="true" />
           <span className="media-empty-title">LTのスライドや様子を記録</span>
           <span className="media-empty-note">
-            {captureKind === "video" ? "動画" : "写真"}を撮ったら、「端末に保存」で写真アプリへ保存します
+            {captureKind === "video" ? "動画" : "写真"}を撮影して、投稿文をつくります
           </span>
         </button>
         {importing}
@@ -327,7 +290,7 @@ function AutoSummarySetting() {
       {ai.phase === "ready" ? <p className="field-note" role="status">要約サーバーに接続しました。</p> : null}
       {ai.phase !== "checking" && state.current.generation !== "generating" ? <button className="outline-button" type="button" onClick={() => void recheckAi()}>接続を再確認</button> : null}
       {state.current.generation === "generating" ? <button className="outline-button" type="button" onClick={cancelAi}>生成を中止</button> : null}
-      {state.current.media?.kind === "video" ? <p className="field-note">動画は冒頭の静止画を縮小してCloudflareへ送信し、文章を作ります。音声や発表全体の要約ではありません。</p> : null}
+      {state.current.media?.kind === "video" ? <p className="field-note">動画は約5秒ごとの場面から投稿文を作ります。長い動画は全体から最大12場面を選びます。音声は解析しません。</p> : null}
       {ai.phase === "ready" && state.current.media && state.current.generation !== "generating" ? (
         <button className="outline-button" type="button" onClick={() => void retryGenerate(state.current.id)}>
           {state.current.body ? "投稿文を作り直す" : "投稿文をつくる"}

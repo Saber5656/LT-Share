@@ -97,18 +97,21 @@ const storedKeys = (page: Page, store: "drafts" | "media") =>
 
 const bodyBox = (page: Page) => page.getByRole("textbox", { name: "投稿文", exact: true });
 const saveButton = (page: Page) => page.getByRole("button", { name: "端末に保存", exact: true });
-const notSavedYet = (page: Page) => page.getByText("まだ端末に保存されていません", { exact: true });
-const savedLine = (page: Page) => page.getByText("端末に保存済み", { exact: true });
-const askLine = (page: Page) => page.getByText("写真アプリ（ギャラリー）に保存できましたか？");
-
-async function recordAndConfirm(page: Page) {
+async function recordPhoto(page: Page) {
   await pickPhoto(page);
-  await saveButton(page).click();
-  await page.getByRole("button", { name: "保存できた" }).click();
-  await expect(savedLine(page)).toBeVisible();
+  await expect(page.getByRole("img", { name: "記録した写真" })).toBeVisible();
 }
 
-test("main flow: record, confirm the device save, post to X, move on, and survive a reload", async ({
+async function openLibrary(page: Page) {
+  const opened = page.waitForEvent("filechooser");
+  await page.getByRole("button", { name: "写真・動画を選ぶ", exact: true }).click();
+  const chooser = await opened;
+  expect(await chooser.element().getAttribute("data-testid")).toBe("pick-library");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  return chooser;
+}
+
+test("main flow: record, optionally save, post to X, move on, and survive a reload", async ({
   page,
   context,
 }) => {
@@ -129,23 +132,16 @@ test("main flow: record, confirm the device save, post to X, move on, and surviv
   await addTag(page, "#rust");
   await expect(page.locator(".tag-chip")).toHaveText(["#TechLTNight", "#Rust"]);
 
-  // ② record: the photo is held by the app but is NOT saved on the device yet
+  // ② import the photo into the app
   await pickPhoto(page);
   await expect(page.getByRole("img", { name: "記録した写真" })).toBeVisible();
-  await expect(notSavedYet(page)).toBeVisible();
-  await expect(savedLine(page)).toHaveCount(0);
 
-  // ③ save to device: the share sheet is only a hand-off; the user must confirm
+  // ③ optionally export the original through the share sheet
   await saveButton(page).click();
-  await expect(askLine(page)).toBeVisible();
-  await expect(savedLine(page)).toHaveCount(0);
   const [first] = await sharedCalls(page);
   expect(first?.files).toHaveLength(1);
   expect(first?.files[0]).toMatchObject({ name: "lt-photo.jpg", type: "image/jpeg" });
   expect(first?.text).toBeNull();
-  await page.getByRole("button", { name: "保存できた" }).click();
-  await expect(savedLine(page)).toBeVisible();
-  await expect(askLine(page)).toHaveCount(0);
 
   // ④ post text + developer toggle
   const body = "RustでCLIを作るLT。clapで引数処理を書き、cargo-distで配布まで自動化する流れを紹介。";
@@ -160,9 +156,8 @@ test("main flow: record, confirm the device save, post to X, move on, and surviv
   await page.getByRole("button", { name: "ポスト確認" }).click();
   const sheet = page.getByRole("dialog", { name: "ポスト確認" });
   await expect(sheet).toBeVisible();
-  const expectedText = `${body}\n\n#TechLTNight #Rust\n\n開発者：`;
+  const expectedText = `${body}\n\n開発者：\n\n#TechLTNight #Rust`;
   await expect(sheet.getByLabel("Xに渡す本文")).toHaveText(expectedText);
-  await expect(sheet.getByText("Xで写真アプリから添付してください", { exact: false })).toBeVisible();
 
   const xLink = sheet.getByRole("link", { name: /Xで開く/ });
   const href = await xLink.getAttribute("href");
@@ -188,7 +183,7 @@ test("main flow: record, confirm the device save, post to X, move on, and surviv
   await sheet.getByRole("button", { name: "閉じる" }).click();
   await expect(sheet).toHaveCount(0);
 
-  // 次の投稿へ: tags stay; text, media and the developer toggle are reset
+  // 次の投稿へ: tags and developer preference stay; text and media reset
   await page.getByRole("button", { name: "次の投稿へ" }).click();
   await expect(page.getByText("1本目を保存しました", { exact: false })).toBeVisible();
   await expect(page.getByText("2本目の投稿案")).toBeVisible();
@@ -196,13 +191,26 @@ test("main flow: record, confirm the device save, post to X, move on, and surviv
   await expect(bodyBox(page)).toHaveValue("");
   await expect(page.getByRole("img", { name: "記録した写真" })).toHaveCount(0);
   await expect(page.getByText("LTのスライドや様子を記録")).toBeVisible();
-  await expect(page.getByRole("switch", { name: "開発者をポストに含める" })).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByRole("switch", { name: "開発者をポストに含める" })).toHaveAttribute("aria-checked", "true");
   await expect(page.getByRole("button", { name: /保存した投稿案 1/ })).toBeVisible();
+
+  await developer.click();
+  await addTag(page, "NextOnly");
+  await expect.poll(async () => page.evaluate(() => new Promise<boolean>((resolve, reject) => {
+    const request = indexedDB.open("lt-share");
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const drafts = request.result.transaction("drafts").objectStore("drafts").getAll();
+      drafts.onsuccess = () => { resolve(drafts.result.some(draft => draft.tags.includes("#NextOnly") && !draft.includeDeveloper)); request.result.close(); };
+      drafts.onerror = () => reject(drafts.error);
+    };
+  }))).toBe(true);
 
   // Reload: everything is restored from the device (IndexedDB)
   await page.reload();
   await expect(page.getByText("2本目の投稿案")).toBeVisible();
-  await expect(page.locator(".tag-chip")).toHaveCount(2);
+  await expect(page.locator(".tag-chip")).toHaveCount(3);
+  await expect(developer).toHaveAttribute("aria-checked", "false");
   await page.getByRole("button", { name: /保存した投稿案 1/ }).click();
 
   const row = page.getByTestId("draft-row");
@@ -227,29 +235,27 @@ test("main flow: record, confirm the device save, post to X, move on, and surviv
   );
 });
 
-test("a dismissed share sheet changes nothing; the media stays unsaved", async ({ page }) => {
+test("a dismissed share sheet preserves the photo and permits the next draft", async ({ page }) => {
   await open(page, "abort");
-  await pickPhoto(page);
+  await recordPhoto(page);
+  await bodyBox(page).fill("cancelled export");
   await saveButton(page).click();
-
-  await expect(notSavedYet(page)).toBeVisible();
-  await expect(askLine(page)).toHaveCount(0);
   await expect(saveButton(page)).toBeEnabled();
+  expect(await sharedCalls(page)).toHaveLength(1);
+  await expect(bodyBox(page)).toHaveValue("cancelled export");
+  await expect(page.getByRole("img", { name: "記録した写真" })).toBeVisible();
+  await page.getByRole("button", { name: "次の投稿へ" }).click();
+  await expect(page.getByText("2本目の投稿案")).toBeVisible();
 });
 
-test("without file sharing the file is downloaded, and still needs the user's confirmation", async ({ page }) => {
+test("without file sharing the original downloads and the draft can move on", async ({ page }) => {
   await open(page, "none");
-  await pickPhoto(page);
-
+  await recordPhoto(page);
   const download = page.waitForEvent("download");
   await saveButton(page).click();
   expect((await download).suggestedFilename()).toBe("lt-photo.jpg");
-
-  await expect(askLine(page)).toBeVisible();
-  await expect(savedLine(page)).toHaveCount(0);
-  await page.getByRole("button", { name: "もう一度" }).click();
-  // "もう一度" starts the save again and asks again afterwards.
-  await expect(askLine(page)).toBeVisible();
+  await page.getByRole("button", { name: "次の投稿へ" }).click();
+  await expect(page.getByText("2本目の投稿案")).toBeVisible();
 });
 
 test("the share sheet is requested inside the tap, and only once the file has been loaded", async ({ page }) => {
@@ -295,16 +301,17 @@ test("a share call that never settles does not leave the save stuck (page visibl
   await open(page, "hang");
   await pickPhoto(page);
   await saveButton(page).click();
-  await expect(page.getByText("共有画面を開いています")).toBeVisible();
+  await expect(saveButton(page)).toBeDisabled();
+  expect(await sharedCalls(page)).toHaveLength(1);
 
   // The user comes back to the page; the share promise never settled.
   await page.evaluate(() => {
     Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
     document.dispatchEvent(new Event("visibilitychange"));
   });
-  await expect(askLine(page)).toBeVisible({ timeout: 5000 });
-  await page.getByRole("button", { name: "保存できた" }).click();
-  await expect(savedLine(page)).toBeVisible();
+  await expect(saveButton(page)).toBeEnabled({ timeout: 5000 });
+  await page.getByRole("button", { name: "次の投稿へ" }).click();
+  await expect(page.getByText("2本目の投稿案")).toBeVisible();
 });
 
 test("a share call that never settles is given up after a timeout", async ({ page }) => {
@@ -312,12 +319,11 @@ test("a share call that never settles is given up after a timeout", async ({ pag
   await open(page, "hang");
   await pickPhoto(page);
   await saveButton(page).click();
-  await expect(page.getByText("共有画面を開いています")).toBeVisible();
+  await expect(saveButton(page)).toBeDisabled();
+  expect(await sharedCalls(page)).toHaveLength(1);
 
   await page.clock.fastForward(61_000);
-  await expect(askLine(page)).toBeVisible();
-  await expect(page.getByRole("button", { name: "もう一度" })).toBeEnabled();
-  await expect(savedLine(page)).toHaveCount(0);
+  await expect(saveButton(page)).toBeEnabled();
 });
 
 test("a failing share shows a failure with retry and a download fallback", async ({ page }) => {
@@ -325,44 +331,42 @@ test("a failing share shows a failure with retry and a download fallback", async
   await pickPhoto(page);
   await saveButton(page).click();
 
-  await expect(page.getByText("端末に保存できませんでした")).toBeVisible();
-  await expect(savedLine(page)).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "再試行" })).toBeVisible();
+  await expect(page.getByText("保存操作を開けませんでした。投稿の準備は続けられます。")).toBeVisible();
+  await expect(saveButton(page)).toBeEnabled();
+  await saveButton(page).click();
+  await expect.poll(async () => (await sharedCalls(page)).length).toBe(2);
 
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "ダウンロードで保存" }).click();
   expect((await download).suggestedFilename()).toBe("lt-photo.jpg");
-  await expect(askLine(page)).toBeVisible();
+  await page.getByRole("button", { name: "次の投稿へ" }).click();
+  await expect(page.getByText("2本目の投稿案")).toBeVisible();
 });
 
-test("次の投稿へ refuses an empty draft and media that is not confirmed saved", async ({ page }) => {
+test("failed optional export still permits archiving the original", async ({ page }) => {
+  await open(page, "fail");
+  await recordPhoto(page);
+  await saveButton(page).click();
+  await expect(page.getByRole("button", { name: "ダウンロードで保存" })).toBeVisible();
+  await page.getByRole("button", { name: "次の投稿へ" }).click();
+  await expect(page.getByText("2本目の投稿案")).toBeVisible();
+  await page.getByRole("button", { name: /保存した投稿案 1/ }).click();
+  await expect(page.getByTestId("draft-row").locator("img")).toBeVisible();
+});
+
+test("次の投稿へ refuses only an empty draft and accepts an unexported photo", async ({ page }) => {
   await open(page);
   const next = page.getByRole("button", { name: "次の投稿へ" });
-
   await next.click();
   await expect(page.getByText("まだ記録も投稿文もありません", { exact: false })).toBeVisible();
   await expect(page.getByText("2本目の投稿案")).toHaveCount(0);
-  // A refused move leaves no speculative second draft on disk.
-  await page.waitForTimeout(600);
-  expect(await storedKeys(page, "drafts")).toHaveLength(1);
-
-  await pickPhoto(page);
-  await bodyBox(page).fill("本文");
-  await next.click();
-  const toast = page.getByRole("status").filter({hasText:"まだ端末に保存されていません"});
-  await expect(toast).toContainText("まだ端末に保存されていません");
-  await expect(page.getByText("1本目の投稿案")).toBeVisible();
-
-  // The toast offers the save action directly
-  await toast.getByRole("button", { name: "端末に保存" }).click();
-  await expect(askLine(page)).toBeVisible();
-  await next.click();
-  await expect(page.getByRole("status").filter({hasText:"確認してください"})).toBeVisible();
-  await expect(page.getByText("1本目の投稿案")).toBeVisible();
-
-  await page.getByRole("button", { name: "保存できた" }).click();
+  await expect.poll(() => storedKeys(page, "drafts")).toHaveLength(1);
+  await recordPhoto(page);
   await next.click();
   await expect(page.getByText("2本目の投稿案")).toBeVisible();
+  expect(await sharedCalls(page)).toHaveLength(0);
+  await expect.poll(() => storedKeys(page, "drafts")).toHaveLength(2);
+  expect(await storedKeys(page, "media")).toHaveLength(1);
 });
 
 test("次の投稿へ waits while a capture is still being stored, and the capture is never lost", async ({ page }) => {
@@ -412,8 +416,6 @@ test("次の投稿へ waits while a capture is still being stored, and the captu
   await expect(page.getByText("1本目の投稿案")).toBeVisible();
   await page.evaluate(() => sessionStorage.removeItem("slowMedia"));
 
-  await saveButton(page).click();
-  await page.getByRole("button", { name: "保存できた" }).click();
   await next.click();
   await expect(page.getByText("1本目を保存しました", { exact: false })).toBeVisible();
   await expect(page.getByText("2本目の投稿案")).toBeVisible();
@@ -429,76 +431,46 @@ test("次の投稿へ waits while a capture is still being stored, and the captu
   expect(await thumb.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
 });
 
-test("re-recording replaces the draft's media and removes the old blob only after it is stored", async ({ page }) => {
+test("library replacement archives the old original and keeps both blobs", async ({ page }) => {
   await open(page);
-  await recordAndConfirm(page);
-
-  const mediaCount = () =>
-    page.evaluate(
-      () =>
-        new Promise<number>((resolve, reject) => {
-          const open = indexedDB.open("lt-share");
-          open.onerror = () => reject(open.error);
-          open.onsuccess = () => {
-            const count = open.result.transaction("media").objectStore("media").count();
-            count.onsuccess = () => resolve(count.result);
-            count.onerror = () => reject(count.error);
-          };
-        }),
-    );
-  await expect.poll(mediaCount).toBe(1);
-
-  // A second recording replaces the first and starts as "not saved" again
-  await pickPhoto(page, { name: "second.jpg", mimeType: "image/jpeg", buffer: Buffer.from("second-photo-bytes") });
-  await expect(notSavedYet(page)).toBeVisible();
-  await expect(savedLine(page)).toHaveCount(0);
-  await expect.poll(mediaCount).toBe(1);
-});
-
-test("re-recording an unsaved photo asks inside the app (not window.confirm) and opens the picker from the tap", async ({
-  page,
-}) => {
-  let nativeDialogs = 0;
-  page.on("dialog", (dialog) => {
-    nativeDialogs += 1;
-    void dialog.dismiss();
-  });
-  await open(page);
-  await pickPhoto(page);
-  await expect(notSavedYet(page)).toBeVisible();
-
-  const record = page.getByRole("button", { name: "記録する" });
-  const dialog = page.getByRole("dialog", { name: "撮り直しますか？" });
-
-  // "やめる" keeps everything as it was.
-  await record.click();
-  await expect(dialog).toBeVisible();
-  await dialog.getByRole("button", { name: "やめる" }).click();
-  await expect(dialog).toHaveCount(0);
+  await recordPhoto(page);
+  await expect.poll(() => storedKeys(page, "media")).toHaveLength(1);
+  const previous = await storedKeys(page, "media");
+  const chooser = await openLibrary(page);
+  await chooser.setFiles(PHOTO);
+  await expect.poll(() => storedKeys(page, "media")).not.toEqual(previous);
+  await expect.poll(() => storedKeys(page, "media")).toHaveLength(2);
+  await page.getByRole("button", { name: /保存した投稿案 1/ }).click();
+  await page.getByTestId("draft-row").click();
   await expect(page.getByRole("img", { name: "記録した写真" })).toBeVisible();
-  await expect(notSavedYet(page)).toBeVisible();
+});
 
-  // "撮り直す" opens the file picker directly from that tap (user activation), then replaces the photo.
-  await record.click();
-  const chooser = page.waitForEvent("filechooser");
-  await dialog.getByRole("button", { name: "撮り直す" }).click();
-  await (await chooser).setFiles({ name: "second.jpg", mimeType: "image/jpeg", buffer: Buffer.from("second-bytes") });
-  await expect(dialog).toHaveCount(0);
-  await expect(notSavedYet(page)).toBeVisible();
-  await expect.poll(() => storedKeys(page, "media")).toHaveLength(1); // the replaced blob is removed once the draft is written
-  expect(nativeDialogs).toBe(0);
-
-  // A photo that is already saved on the device needs no confirmation.
-  await saveButton(page).click();
-  await page.getByRole("button", { name: "保存できた" }).click();
-  const direct = page.waitForEvent("filechooser");
-  await record.click();
-  await direct;
-  await expect(dialog).toHaveCount(0);
+test("library picker opens from the tap and cancellation preserves the existing draft", async ({ page }) => {
+  let nativeDialogs = 0;
+  page.on("dialog", dialog => { nativeDialogs++; void dialog.dismiss(); });
+  await open(page);
+  await recordPhoto(page);
+  await bodyBox(page).fill("keep this draft");
+  await addTag(page, "Keep");
+  const image = page.getByRole("img", { name: "記録した写真" });
+  const previousUrl = await image.getAttribute("src");
+  const previous = await storedKeys(page, "media");
+  await page.evaluate(() => {
+    const input = document.querySelector<HTMLInputElement>('[data-testid="pick-library"]')!;
+    input.addEventListener("click", () => {
+      (window as unknown as { pickerActivation: boolean }).pickerActivation = navigator.userActivation.isActive;
+    });
+  });
+  await (await openLibrary(page)).setFiles([]);
+  expect(await page.evaluate(() => (window as unknown as { pickerActivation: boolean }).pickerActivation)).toBe(true);
+  await expect(bodyBox(page)).toHaveValue("keep this draft");
+  await expect(page.locator(".tag-chip")).toHaveText(["#Keep"]);
+  await expect(image).toHaveAttribute("src", previousUrl!);
+  expect(await storedKeys(page, "media")).toEqual(previous);
   expect(nativeDialogs).toBe(0);
 });
 
-test("a video is recorded through the video picker", async ({ page }) => {
+test("legacy video input accepts a video and optional export shares the original", async ({ page }) => {
   await open(page);
   await page.getByRole("radio", { name: "動画" }).click();
   await page
@@ -506,10 +478,7 @@ test("a video is recorded through the video picker", async ({ page }) => {
     .setInputFiles({ name: "talk.mp4", mimeType: "video/mp4", buffer: Buffer.from("not-a-real-video") });
 
   await expect(page.locator(".media-frame video")).toBeVisible();
-  await expect(notSavedYet(page)).toBeVisible();
   await saveButton(page).click();
-  await page.getByRole("button", { name: "保存できた" }).click();
-  await expect(savedLine(page)).toBeVisible();
   const [call] = await sharedCalls(page);
   expect(call?.files[0]).toMatchObject({ name: "talk.mp4", type: "video/mp4" });
 });
@@ -730,9 +699,8 @@ test("persistent storage is requested once; on start only orphaned blobs are cle
     });
   });
   await open(page);
-  await recordAndConfirm(page);
+  await recordPhoto(page);
   await pickPhoto(page, { name: "second.jpg", mimeType: "image/jpeg", buffer: Buffer.from("second-photo-bytes") });
-  await expect(notSavedYet(page)).toBeVisible();
   expect(await page.evaluate(() => (window as unknown as { __persistCalls: number }).__persistCalls)).toBe(1);
   await page.waitForTimeout(600); // let the debounced write finish
 
@@ -749,8 +717,8 @@ test("persistent storage is requested once; on start only orphaned blobs are cle
           };
         }),
     );
-  const [referenced] = await mediaIds();
-  expect(await mediaIds()).toHaveLength(1);
+  const referenced = await mediaIds();
+  expect(await mediaIds()).toHaveLength(2);
 
   // A blob that no draft references (e.g. an interrupted capture) is left in storage.
   await page.evaluate(
@@ -765,10 +733,10 @@ test("persistent storage is requested once; on start only orphaned blobs are cle
         };
       }),
   );
-  expect(await mediaIds()).toHaveLength(2);
+  expect(await mediaIds()).toHaveLength(3);
 
   await page.reload();
-  await expect.poll(mediaIds).toEqual([referenced]);
+  await expect.poll(mediaIds).toEqual(referenced);
   await expect(page.getByRole("img", { name: "記録した写真" })).toBeVisible();
 });
 
@@ -783,7 +751,7 @@ test("a storage read error offers a retry instead of telling the user to record 
     };
   });
   await open(page);
-  await recordAndConfirm(page);
+  await recordPhoto(page);
   await page.waitForTimeout(600); // let the debounced write finish
 
   await page.evaluate(() => sessionStorage.setItem("failMediaRead", "1"));
@@ -797,7 +765,6 @@ test("a storage read error offers a retry instead of telling the user to record 
   await page.evaluate(() => sessionStorage.removeItem("failMediaRead"));
   await alert.getByRole("button", { name: "再試行" }).click();
   await expect(page.getByRole("img", { name: "記録した写真" })).toBeVisible();
-  await expect(savedLine(page)).toBeVisible();
 });
 
 test("text and tags are restored after a reload without moving on", async ({ page }) => {

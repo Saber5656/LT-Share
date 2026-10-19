@@ -304,7 +304,6 @@ export function useController({
         if (stored.persisted) void requestPersistentStorage(navigator.storage, browserStorage());
 
         const current = stateRef.current.current;
-        if (current.media) persistence.queueMediaDelete(current.media.id);
         dispatch({ type: "mediaCaptured", draftId: current.id, media });
         // Inference starts from the captured file, independently of the Photos save flow.
         if (serverRef.current.state.phase === "ready" && autoSummaryRef.current && current.bodySource !== "user") {
@@ -375,32 +374,11 @@ export function useController({
 
   /* ---------- 次の投稿へ (FR-10) ---------- */
 
-  // Says why 次の投稿へ was refused (and offers the fix where there is one).
   const explainRefusal = useCallback(
-    (current: Draft, blocker: NextDraftBlocker) => {
-      if (blocker === "empty") {
-        showToast("まだ記録も投稿文もありません。入力してから次へ進めます");
-        return;
-      }
-      const noun = current.media ? mediaNoun(current.media.kind) : "記録";
-      document.getElementById("step-record")?.scrollIntoView({ behavior: "smooth", block: "center" });
-      if (blocker === "media-unsaved" && current.media?.source === "library") {
-        showToast(`${noun}の原本が端末にあるか、「記録」の下で確認してください`);
-        return;
-      }
-      if (blocker === "media-confirming") {
-        showToast(`${noun}を端末に保存できたか、「記録」の下で確認してください`);
-        return;
-      }
-      const retry = blocker === "media-failed";
-      showToast(
-        retry
-          ? `${noun}を端末に保存できていません。もう一度保存してください`
-          : `${noun}がまだ端末に保存されていません。保存してから次へ進めます`,
-        { label: retry ? "再試行" : "端末に保存", run: () => void saveMedia(current.id) },
-      );
+    (_current: Draft, _blocker: NextDraftBlocker) => {
+      showToast("まだ記録も投稿文もありません。入力してから次へ進めます");
     },
-    [saveMedia, showToast],
+    [showToast],
   );
 
   const goNext = useCallback(async () => {

@@ -43,7 +43,7 @@ export function createCloudflareWorker({timeoutMs=22000}={}) {
         chat_template_kwargs:{enable_thinking:false},
         messages:[
           {role:'system',content:PROMPT},
-          {role:'user',content:[{type:'text',text:'この画像の見える事実を要約してください。'},{type:'image_url',image_url:{url:`data:${mime};base64,${base64(bytes)}`}}]}
+          {role:'user',content:[{type:'text',text:'画像で読める機能・製品名をもとに、用途への期待や面白さが伝わる短い感想文を作ってください。複数場面なら全体を確認してください。'},{type:'image_url',image_url:{url:`data:${mime};base64,${base64(bytes)}`}}]}
         ]
       };
       const response = await Promise.race([

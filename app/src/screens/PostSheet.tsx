@@ -73,7 +73,7 @@ function PostSheetBody({ draft }: { draft: Draft }) {
       <PostCounter count={count} />
 
       {media ? (
-        <div className={`attach-note${media.saveStatus === "saved" ? "" : " is-warn"}`}>
+        <div className="attach-note">
           {view?.status === "ready" ? (
             media.kind === "video" ? (
               <video src={`${view.url}#t=0.1`} preload="metadata" muted playsInline aria-hidden="true" />
@@ -84,15 +84,7 @@ function PostSheetBody({ draft }: { draft: Draft }) {
             <span className="attach-thumb-empty" aria-hidden="true" />
           )}
           <p>
-            {media.saveStatus === "saved"
-              ? `${noun}は端末に保存済みです。リンクで渡せるのは本文だけなので、Xで写真アプリから添付してください。`
-              : media.source === "library" && media.saveStatus === "unsaved"
-                ? `${noun}の原本が端末にあるか確認してください。リンクで渡せるのは本文だけです。写真アプリに原本があれば、Xでそのまま添付できます。`
-              : `${noun}はまだ端末に保存されていません。Xには本文だけが渡ります。${
-                  canShareFile
-                    ? `下の「${noun}付きで共有」を使うか、先に「端末に保存」してください。`
-                    : "先に「端末に保存」すると、Xで写真アプリから添付できます。"
-                }`}
+            リンクで渡せるのは本文です。{canShareFile ? `「${noun}付きで共有」から一緒に渡すか、Xで添付できます。` : `${noun}はXの投稿画面で添付できます。`}
           </p>
         </div>
       ) : null}

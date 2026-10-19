@@ -1200,3 +1200,15 @@ button:disabled {
 .auto-summary-setting { border-top-color: var(--lt-line); }
 .auto-summary-setting > .field-note { margin-top: 8px; }
 .auto-summary-setting .outline-button { min-height: 44px; height: auto; padding-top: 8px; padding-bottom: 8px; }
+
+/* Live camera: a visible preview and explicit shutter, with an accessible fallback. */
+.camera-capture { display: grid; gap: 12px; }
+.camera-toolbar { display: flex; align-items: center; justify-content: space-between; }
+.camera-toolbar .text-button { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; }
+.camera-preview { position: relative; background: #101214; border-radius: 16px; overflow: hidden; aspect-ratio: 4 / 3; }
+.camera-preview video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.camera-loading { position: absolute; inset: 0; display: grid; place-items: center; color: white; margin: 0; }
+.camera-timer { position: absolute; top: 12px; left: 12px; background: #b91c1c; color: white; padding: 4px 10px; border-radius: 20px; font-variant-numeric: tabular-nums; }
+.camera-error { font-size: 14px; line-height: 1.6; }
+.camera-error p { margin: 0 0 10px; }
+.camera-shutter.is-recording { background: #b91c1c; }

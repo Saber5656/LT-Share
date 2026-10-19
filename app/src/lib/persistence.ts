@@ -65,7 +65,10 @@ export class Persistence {
 
   async putMedia(id: string, blob: Blob): Promise<{ persisted: boolean; error?: unknown }> {
     this.memory.set(id, blob);
-    if (!this.repo || this.readOnly) return { persisted: false };
+    if (!this.repo || this.readOnly) {
+      this.unpersisted.add(id);
+      return { persisted: false };
+    }
     this.pinned.add(id);
     try {
       await this.repo.putMedia(id, blob);
@@ -82,7 +85,8 @@ export class Persistence {
   /**
    * Keeps only the blobs that are needed right now (the current draft's media) in
    * memory. Everything else can be read back from storage on demand. A blob that
-   * exists nowhere else (its write failed) or is being written is never released.
+   * exists nowhere else (storage is unavailable or its write failed) or is being
+   * written is never released.
    */
   retainMedia(ids: Iterable<string>): void {
     const keep = new Set(ids);
@@ -114,7 +118,7 @@ export class Persistence {
     return deleted;
   }
 
-  /** Blobs that live only in memory because the browser refused to store them. */
+  /** Blobs that live only in memory because storage is unavailable or a write failed. */
   get unpersistedMediaIds(): ReadonlySet<string> {
     return this.unpersisted;
   }
@@ -148,13 +152,18 @@ export class Persistence {
     return blob;
   }
 
-  /** Schedules a blob for deletion once a successful write no longer references it. */
+  /** Schedules deletion after a successful write, or a memory-only flush, no longer references the blob. */
   queueMediaDelete(id: string): void {
     this.pendingMediaDeletes.add(id);
   }
 
   private async write(state: DraftState, omit: ReadonlySet<string>): Promise<FlushResult> {
     if (!this.repo || this.readOnly) {
+      // With no repository, the in-memory state is authoritative for deletion.
+      // A read-only tab must still never perform cleanup.
+      if (!this.repo && !this.readOnly) {
+        await this.deleteUnreferencedMedia([state.current, ...state.history]);
+      }
       return { ok: false, error: new Error("On-device storage is not available for writing") };
     }
 
@@ -185,13 +194,13 @@ export class Persistence {
   }
 
   private async deleteUnreferencedMedia(drafts: Draft[]): Promise<void> {
-    if (!this.repo || this.pendingMediaDeletes.size === 0) return;
+    if (this.pendingMediaDeletes.size === 0) return;
     const referenced = new Set(drafts.flatMap((draft) => (draft.media ? [draft.media.id] : [])));
 
     for (const id of [...this.pendingMediaDeletes]) {
       if (referenced.has(id)) continue;
       try {
-        await this.repo.deleteMedia(id);
+        await this.repo?.deleteMedia(id);
         this.pendingMediaDeletes.delete(id);
         this.unpersisted.delete(id);
         this.memory.delete(id);

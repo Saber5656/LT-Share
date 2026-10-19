@@ -1,8 +1,6 @@
 import {
   ArrowsClockwiseIcon,
-  CheckCircleIcon,
   PlayIcon,
-  QuestionIcon,
   WarningCircleIcon,
 } from "@phosphor-icons/react";
 import type { MediaView } from "../app/useMedia.ts";
@@ -81,134 +79,21 @@ export function MediaThumb({ media, view }: { media: Media | null; view: MediaVi
   );
 }
 
-/**
- * FR-03: the page cannot tell whether a file really reached the photo library, so
- * "saved" is only ever shown after the user confirmed it themselves.
- */
-export function DeviceSaveStatus({
-  media,
-  busy,
-  onSave,
-  onSaveByDownload,
-  onConfirm,
-  onAgain,
-  ready = true,
-}: {
-  media: Media;
-  busy: boolean;
-  // False until the file is loaded: the buttons that open the share sheet stay disabled,
-  // so navigator.share() can always be called synchronously from the tap (iOS).
-  ready?: boolean;
-  onSave?: () => void;
-  onSaveByDownload?: () => void;
-  onConfirm?: () => void;
-  onAgain?: () => void;
+/** Optional export; photo-library confirmation never gates draft progression. */
+export function DeviceSaveStatus({ media, busy, onSave, onSaveByDownload, ready = true }: {
+  media: Media; busy: boolean; ready?: boolean;
+  onSave?: () => void; onSaveByDownload?: () => void;
+  onConfirm?: () => void; onAgain?: () => void;
 }) {
-  const noun = mediaNoun(media.kind);
-
-  if (media.saveStatus === "saved") {
-    return (
-      <div className="save-box" aria-live="polite">
-        <p className="status-line">
-          <CheckCircleIcon size={20} weight="fill" className="status-ok" aria-hidden="true" />
-          端末に保存済み
-        </p>
-      </div>
-    );
-  }
-
-  if (busy) {
-    return (
-      <div className="save-box" aria-live="polite">
-        <p className="status-line">
-          <ArrowsClockwiseIcon size={20} className="spin" aria-hidden="true" />
-          共有画面を開いています…
-        </p>
-      </div>
-    );
-  }
-
-  if (media.saveStatus === "confirming") {
-    return (
-      <div className="save-box is-ask" aria-live="polite">
-        <p className="status-line is-strong">
-          <QuestionIcon size={20} weight="fill" aria-hidden="true" />
-          写真アプリ（ギャラリー）に保存できましたか？
-        </p>
-        {onConfirm && onAgain ? (
-          <div className="save-actions">
-            <button type="button" className="small-button is-primary" onClick={onConfirm}>
-              保存できた
-            </button>
-            <button type="button" className="small-button" onClick={onAgain} disabled={!ready}>
-              もう一度
-            </button>
-          </div>
-        ) : null}
-        <p className="save-hint">
-          共有画面の「{media.kind === "video" ? "ビデオを保存" : "画像を保存"}」を選ぶと、写真アプリに保存されます。ダウンロードした場合は、ファイルを写真アプリ（ギャラリー）に追加してください。
-        </p>
-      </div>
-    );
-  }
-
-  if (media.saveStatus === "failed") {
-    return (
-      <div className="save-box is-warn" aria-live="polite">
-        <p className="status-line is-error">
-          <WarningCircleIcon size={20} weight="fill" aria-hidden="true" />
-          端末に保存できませんでした
-        </p>
-        {onSave ? (
-          <div className="save-actions">
-            <button type="button" className="small-button is-primary" onClick={onSave} disabled={!ready}>
-              再試行
-            </button>
-            {onSaveByDownload ? (
-              <button type="button" className="small-button" onClick={onSaveByDownload} disabled={!ready}>
-                ダウンロードで保存
-              </button>
-            ) : null}
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  if (media.source === "library" && onConfirm) {
-    return (
-      <div className="save-box is-ask" aria-live="polite">
-        <p className="status-line is-strong">
-          <QuestionIcon size={20} weight="fill" aria-hidden="true" />
-          元の{noun}は端末にありますか？
-        </p>
-        <p className="save-hint">写真アプリなどに原本があれば、保存し直す必要はありません。</p>
-        <div className="save-actions">
-          <button type="button" className="small-button is-primary" onClick={onConfirm}>
-            元のファイルが端末にある
-          </button>
-          {onSave ? <button type="button" className="small-button" onClick={onSave} disabled={!ready}>端末に保存</button> : null}
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="save-box is-warn" aria-live="polite">
+  return <div className="save-box" aria-live="polite">
+    {busy ? <p className="status-line"><ArrowsClockwiseIcon size={20} className="spin" aria-hidden="true" />保存操作を開いています…<button type="button" className="small-button" disabled>端末に保存</button></p> : <>
+      {media.saveStatus === "failed" ? <p className="status-line is-error"><WarningCircleIcon size={20} aria-hidden="true" />保存操作を開けませんでした。投稿の準備は続けられます。</p> : null}
       <div className="save-row">
-        <p className="status-line is-warn">
-          <WarningCircleIcon size={20} weight="fill" aria-hidden="true" />
-          まだ端末に保存されていません
-        </p>
-        {onSave ? (
-          <button type="button" className="small-button is-primary" onClick={onSave} disabled={!ready}>
-            端末に保存
-          </button>
-        ) : null}
+        <p className="save-hint">写真アプリにも残す場合は、端末に保存できます。</p>
+        {onSave ? <button type="button" className="small-button" onClick={onSave} disabled={!ready}>端末に保存</button> : null}
       </div>
-      <p className="save-hint">
-        ブラウザは{noun}を写真アプリへ自動では保存できません。「端末に保存」から保存してください。
-      </p>
-    </div>
-  );
+      {media.saveStatus === "failed" && onSaveByDownload ? <button type="button" className="small-button" onClick={onSaveByDownload} disabled={!ready}>ダウンロードで保存</button> : null}
+      {media.saveStatus === "confirming" ? <p className="save-hint">保存操作を開きました。そのまま投稿の準備を続けられます。</p> : null}
+    </>}
+  </div>;
 }

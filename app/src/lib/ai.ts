@@ -15,10 +15,10 @@ export async function loadAiStatus(fetcher: Fetcher = fetch): Promise<AiStatus> 
     return { available: data.available === true && data.provider === 'cloudflare', provider: data.provider === 'cloudflare' ? data.provider : undefined, model: typeof data.model === 'string' ? data.model : undefined, reason: typeof data.reason === 'string' ? data.reason : undefined };
   } catch { return { available: false, reason: 'unavailable' }; }
 }
-export function createHttpAiProvider(fetcher: Fetcher = fetch, prepare: (blob: Blob) => Promise<Blob> = async blob => blob): AiProvider {
+export function createHttpAiProvider(fetcher: Fetcher = fetch, prepare: (blob: Blob, signal?: AbortSignal) => Promise<Blob> = async blob => blob): AiProvider {
   return { async generate({ image, tags, signal }) {
     signal?.throwIfAborted();
-    const prepared = await prepare(image);
+    const prepared = await prepare(image, signal);
     signal?.throwIfAborted();
     const form = new FormData(); form.set('image', prepared, 'lt-summary.jpg'); form.set('tags', JSON.stringify(tags));
     const response = await fetcher('/api/summary', { method: 'POST', headers: { 'X-LT-Share-Request': 'summary-v1' }, body: form, signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(35000)]) : AbortSignal.timeout(35000) });

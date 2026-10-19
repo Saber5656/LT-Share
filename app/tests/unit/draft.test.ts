@@ -48,7 +48,7 @@ test("addTags appends new tags and skips case-insensitive duplicates", () => {
 
 /* ---------- composing the post ---------- */
 
-test("composePost appends tags and the developer label only when enabled", () => {
+test("composePost puts hashtags last after the optional developer label", () => {
   const body = "RustでCLIを作るLT。";
   assert.equal(
     composePost({ body, tags: ["#TechLTNight", "#Rust"], includeDeveloper: false }),
@@ -56,7 +56,7 @@ test("composePost appends tags and the developer label only when enabled", () =>
   );
   assert.equal(
     composePost({ body, tags: ["#TechLTNight"], includeDeveloper: true }),
-    "RustでCLIを作るLT。\n\n#TechLTNight\n\n開発者：",
+    "RustでCLIを作るLT。\n\n開発者：\n\n#TechLTNight",
   );
   assert.equal(composePost({ body: "", tags: ["#A"], includeDeveloper: false }), "#A");
 });
@@ -85,7 +85,7 @@ test("xWeightedLength ends a URL at the first non-ASCII character", () => {
 
 /* ---------- next draft ---------- */
 
-test("nextDraft saves the current draft and carries only the tags over", () => {
+test("nextDraft saves the current draft and carries tags and developer preference over", () => {
   const next = draftReducer(stateWithDraft(), { type: "nextDraft", now: 2000 });
 
   assert.equal(next.history.length, 1);
@@ -98,7 +98,7 @@ test("nextDraft saves the current draft and carries only the tags over", () => {
   assert.deepEqual(next.current.tags, ["#TechLTNight"]);
   assert.equal(next.current.body, "");
   assert.equal(next.current.media, null);
-  assert.equal(next.current.includeDeveloper, false);
+  assert.equal(next.current.includeDeveloper, true);
   assert.equal(next.nextId, 5);
 });
 
@@ -136,18 +136,53 @@ test("nextDraft is refused for an empty draft", () => {
   assert.equal(nextDraftBlocker(empty.current), "empty");
 });
 
-test("nextDraft is refused until the media is confirmed as saved on the device", () => {
-  for (const [status, blocker] of [
-    ["unsaved", "media-unsaved"],
-    ["confirming", "media-confirming"],
-    ["failed", "media-failed"],
-  ] as const) {
-    const state = stateWithDraft({ media: media(status) });
-    assert.equal(draftReducer(state, { type: "nextDraft" }), state, status);
-    assert.equal(nextDraftBlocker(state.current), blocker, status);
-    assert.equal(canMoveToNextDraft(state.current), false, status);
+for (const kind of ["photo", "video"] as const) {
+  for (const status of ["unsaved", "confirming", "failed", "saved"] as const) {
+    test(`nextDraft accepts ${kind}-only drafts with ${status} media`, () => {
+      const state = stateWithDraft({ body: "", media: media(status, { kind }) });
+      const snapshot = structuredClone(state.current);
+      assert.equal(nextDraftBlocker(state.current), null);
+      assert.equal(canMoveToNextDraft(state.current), true);
+      const next = draftReducer(state, { type: "nextDraft" });
+      assert.equal(next.current.id, "d4");
+      assert.equal(next.current.media, null);
+      assert.deepEqual(next.history[0], snapshot);
+      assert.deepEqual(state.current, snapshot);
+    });
   }
-  assert.equal(nextDraftBlocker(stateWithDraft().current), null);
+}
+
+test("nextDraft preserves either developer preference and isolates historical settings", () => {
+  for (const includeDeveloper of [false, true]) {
+    const initial = stateWithDraft({ includeDeveloper });
+    const snapshot = structuredClone(initial.current);
+    let state = draftReducer(initial, { type: "nextDraft" });
+    assert.equal(state.current.includeDeveloper, includeDeveloper);
+    assert.notEqual(state.current.tags, initial.current.tags);
+    state = draftReducer(state, { type: "setIncludeDeveloper", value: !includeDeveloper });
+    state = draftReducer(state, { type: "removeTag", tag: "#TechLTNight" });
+    state = draftReducer(state, { type: "addTags", input: "#Rust" });
+    assert.deepEqual(state.history[0], snapshot);
+    state = draftReducer(state, { type: "setBody", body: "next" });
+    state = draftReducer(state, { type: "nextDraft" });
+    assert.equal(state.current.includeDeveloper, !includeDeveloper);
+    assert.deepEqual(state.current.tags, ["#Rust"]);
+    assert.deepEqual(state.history[0], snapshot);
+  }
+});
+
+test("whitespace with tags and developer label is still an empty draft", () => {
+  const state = stateWithDraft({ body: " \n ", media: null });
+  assert.equal(nextDraftBlocker(state.current), "empty");
+  assert.equal(canMoveToNextDraft(state.current), false);
+  assert.equal(draftReducer(state, { type: "nextDraft" }), state);
+});
+
+test("legacy save confirmation can update history after moving on", () => {
+  let state = draftReducer(stateWithDraft({ media: media("confirming") }), { type: "nextDraft" });
+  state = draftReducer(state, { type: "saveConfirmed", draftId: "d3", mediaId: "m1" });
+  assert.equal(state.history[0]?.media?.saveStatus, "saved");
+  assert.equal(state.current.media, null);
 });
 
 test("a text-only draft can move on, and so can media-only", () => {
@@ -285,7 +320,7 @@ test("the developer toggle only changes the current draft", () => {
   assert.equal(state.current.includeDeveloper, true);
   assert.equal(
     composePost({ body: state.current.body, tags: state.current.tags, includeDeveloper: state.current.includeDeveloper }),
-    "本文\n\n#TechLTNight\n\n開発者：",
+    "本文\n\n開発者：\n\n#TechLTNight",
   );
 });
 
@@ -330,4 +365,24 @@ test('cancelled regeneration preserves the original manual-text protection', () 
   state = draftReducer(state,{type:'generateStart',draftId});
   state = draftReducer(state,{type:'generateDone',draftId,text:'後続の自動生成'});
   assert.equal(state.current.body,'残す手入力');
+});
+
+test("composePost omits empty sections and keeps multiline body before the final hashtag line", () => {
+  assert.equal(composePost({ body: "  first\nsecond  ", tags: ["#A", "#B"], includeDeveloper: true }), "first\nsecond\n\n開発者：\n\n#A #B");
+  assert.equal(composePost({ body: " ", tags: ["#A"], includeDeveloper: true }), "開発者：\n\n#A");
+  assert.equal(composePost({ body: " body ", tags: [], includeDeveloper: true }), "body\n\n開発者：");
+  assert.equal(composePost({ body: " ", tags: [], includeDeveloper: false }), "");
+});
+
+test("replacement archives the original recording without a confirmation gate", () => {
+  let state = stateWithDraft({media:null});
+  const old = { id: "original", kind: "photo" as const, mime: "image/jpeg", name: "old.jpg", size: 10, saveStatus: "unsaved" as const };
+  state = draftReducer(state, { type: "mediaCaptured", draftId: state.current.id, media: old });
+  state = draftReducer(state, { type: "setBody", body: "元の感想" });
+  state = draftReducer(state, { type: "mediaCaptured", draftId: state.current.id, media: { ...old, id: "replacement" } });
+  assert.equal(state.history.length, 1);
+  assert.equal(state.history[0]?.media?.id, "original");
+  assert.equal(state.history[0]?.body, "元の感想");
+  assert.notEqual(state.history[0]?.id, state.current.id);
+  assert.equal(state.current.media?.id, "replacement");
 });
