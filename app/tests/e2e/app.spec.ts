@@ -159,7 +159,8 @@ test("main flow: record, optionally save, post to X, move on, and survive a relo
   const expectedText = `${body}\n\n開発者：\n\n#TechLTNight #Rust`;
   await expect(sheet.getByLabel("Xに渡す本文")).toHaveText(expectedText);
 
-  const xLink = sheet.getByRole("link", { name: /Xで開く/ });
+  const xLink = sheet.getByRole("link", { name: "本文だけでXを開く", exact: true });
+  await expect(xLink).not.toHaveClass(/\bprimary-button\b/);
   const href = await xLink.getAttribute("href");
   expect(href).toBe(`https://x.com/intent/post?text=${encodeURIComponent(expectedText)}`);
   expect(href).toContain(encodeURIComponent("#TechLTNight"));
@@ -167,12 +168,16 @@ test("main flow: record, optionally save, post to X, move on, and survive a relo
   await expect(xLink).toHaveAttribute("target", "_blank");
   await expect(xLink).toHaveAttribute("rel", /noopener/);
 
-  // Media + text share (user picks X in the share sheet)
-  await sheet.getByRole("button", { name: "写真付きで共有" }).click();
+  // The primary action shares the original photo and composed text (the user picks X).
+  const photoHandoff = sheet.getByRole("button", { name: "写真と本文をXへ", exact: true });
+  await expect(photoHandoff).toHaveClass(/\bprimary-button\b/);
+  await photoHandoff.click();
   await expect.poll(async () => (await sharedCalls(page)).length).toBe(2);
   const second = (await sharedCalls(page))[1];
   expect(second?.text).toBe(expectedText);
-  expect(second?.files[0]?.name).toBe("lt-photo.jpg");
+  expect(second?.files).toEqual(first?.files);
+  expect(second?.sameTask).toBe(true);
+  expect(second?.activation).toBe(true);
 
   // The real anchor opens X in a new tab and marks the draft as opened (never as posted)
   const popup = page.waitForEvent("popup");
@@ -229,7 +234,7 @@ test("main flow: record, optionally save, post to X, move on, and survive a relo
   await expect(page.getByRole("img", { name: "記録した写真" })).toBeVisible();
   await expect(page.getByLabel("保存した投稿案の本文")).toHaveText(expectedText);
   await page.getByRole("button", { name: "もう一度ポスト確認" }).click();
-  await expect(page.getByRole("dialog", { name: "ポスト確認" }).getByRole("link", { name: /Xで開く/ })).toHaveAttribute(
+  await expect(page.getByRole("dialog", { name: "ポスト確認" }).getByRole("link", { name: "本文だけでXを開く", exact: true })).toHaveAttribute(
     "href",
     `https://x.com/intent/post?text=${encodeURIComponent(expectedText)}`,
   );

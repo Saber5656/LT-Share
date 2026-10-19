@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useServerAi, type ServerAiView } from "./useServerAi.ts";
 import { sharePostWithMedia } from "../lib/deviceShare.ts";
+import { browserEscapeEnv, settleOrEscape, STUCK } from "../lib/settle.ts";
 import {
   composeDraftPost,
   createDraftId,
@@ -39,6 +40,8 @@ export type StorageProblem =
   | { kind: "write" };
 export type ToastAction = { label: string; run: () => void };
 export type ToastState = { id: number; message: string; action?: ToastAction };
+export type PostShareResult = "shared" | "cancelled" | "failed" | "stuck" | "busy";
+type PostShareState = { draftId: string; mediaId: string | undefined; result: PostShareResult };
 
 export type App = {
   state: DraftState;
@@ -69,7 +72,9 @@ export type App = {
   goNext: () => Promise<void>;
   openPostSheet: (draftId: string) => void;
   markOpenedInX: (draftId: string) => void;
-  shareWithMedia: (draft: Draft, file: File) => Promise<void>;
+  postShareBusy: boolean;
+  postShareResult: PostShareState | null;
+  shareWithMedia: (draft: Draft, file: File) => Promise<PostShareResult>;
   retryGenerate: (draftId: string) => Promise<void>;
   findDraft: (draftId: string | null) => Draft | null;
 };
@@ -114,6 +119,7 @@ export function useController({
   const [captureKind, setCaptureKind] = useState<MediaKind>("photo");
   const [saveBusy, setSaveBusy] = useState(false);
   const saveBusyRef = useRef(false);
+  const postShareRef = useRef(false);
   const nextBusyRef = useRef(false);
   // Set while a captured file is being stored (kind shown in the indicator).
   const [captureBusy, setCaptureBusy] = useState<MediaKind | null>(null);
@@ -328,7 +334,7 @@ export function useController({
   // comes from memory only; the buttons stay disabled until the media is loaded.
   const saveMedia = useCallback(
     (draftId: string, mode: "auto" | "download" = "auto"): Promise<void> => {
-      if (saveBusyRef.current) return Promise.resolve();
+      if (saveBusyRef.current || postShareRef.current) return Promise.resolve();
       const media = findDraftIn(stateRef.current, draftId)?.media;
       if (!media) return Promise.resolve();
 
@@ -452,13 +458,31 @@ export function useController({
     dispatch({ type: "openedInX", draftId });
   }, []);
 
+  // App-scoped lock also covers closing and reopening the post sheet.
+  const [postShareBusy, setPostShareBusy] = useState(false);
+  const [postShareResult, setPostShareResult] = useState<PostShareState | null>(null);
   const shareWithMedia = useCallback(
-    async (draft: Draft, file: File) => {
+    async (draft: Draft, file: File): Promise<PostShareResult> => {
+      if (postShareRef.current || saveBusyRef.current) return "busy";
+      postShareRef.current = true;
+      setPostShareBusy(true);
+      setPostShareResult(null);
+      const finish = (result: PostShareResult) => {
+        setPostShareResult({ draftId: draft.id, mediaId: draft.media?.id, result });
+        return result;
+      };
       try {
-        const result = await sharePostWithMedia(file, composeDraftPost(draft));
-        if (result === "shared") showToast("共有しました。投稿が完了したかどうかはXでご確認ください");
+        // Do not await storage, clipboard or network before share(): iOS needs
+        // the original tap's activation. The File is prepared by PostSheet.
+        const result = await settleOrEscape(sharePostWithMedia(file, composeDraftPost(draft)), browserEscapeEnv());
+        if (result === STUCK) return finish("stuck");
+        if (result === "shared") showToast("共有先へ渡しました。写真と本文はXの投稿画面で確認してください");
+        return finish(result);
       } catch {
-        showToast("共有できませんでした。Xを開くリンクから本文だけ渡せます");
+        return finish("failed");
+      } finally {
+        postShareRef.current = false;
+        setPostShareBusy(false);
       }
     },
     [showToast],
@@ -491,6 +515,8 @@ export function useController({
     openPostSheet,
     markOpenedInX,
     shareWithMedia,
+    postShareBusy,
+    postShareResult,
     retryGenerate,
     findDraft,
   };

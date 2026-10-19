@@ -3,8 +3,7 @@
 //
 // Browsers cannot write to the photo library silently. The best a web page can
 // do is open the share sheet (iOS offers "画像を保存" / "ビデオを保存") or start a
-// download. Neither tells the page whether the user really saved the file, so
-// the callers must ask the user instead of assuming success.
+// download. Neither proves that the file reached Photos; do not claim it did.
 
 import type { Media } from "./draft.ts";
 
@@ -55,8 +54,7 @@ function canShareFiles(data: ShareData, env: ShareEnv): boolean {
 /**
  * "端末に保存": share sheet when the browser can share files, otherwise a download.
  * Resolves "cancelled" when the user dismisses the sheet; rejects on real errors.
- * It never reports "saved": whether the file reached the photo library is for
- * the user to confirm.
+ * It never reports "saved": photo-library receipt cannot be observed here.
  */
 export async function saveToDevice(
   file: File,

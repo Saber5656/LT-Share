@@ -25,13 +25,13 @@ export function PostSheet() {
       title="ポスト確認"
       description="この内容でXの投稿画面を開きます。投稿はXで行います。"
     >
-      {draft ? <PostSheetBody draft={draft} /> : null}
+      {draft ? <PostSheetBody key={`${draft.id}:${draft.media?.id ?? "text"}`} draft={draft} /> : null}
     </Sheet>
   );
 }
 
 function PostSheetBody({ draft }: { draft: Draft }) {
-  const { persistence, nav, markOpenedInX, shareWithMedia, showToast } = useApp();
+  const { state, persistence, nav, markOpenedInX, shareWithMedia, saveBusy, postShareBusy, postShareResult, showToast } = useApp();
   const text = composeDraftPost(draft);
   const count = xWeightedLength(text);
   const over = count > X_POST_LIMIT;
@@ -61,6 +61,30 @@ function PostSheetBody({ draft }: { draft: Draft }) {
   // Offered only when the browser can share this file together with the text.
   const canShareFile = file !== null && canSharePostWithMedia(file, text);
   const noun = media ? mediaNoun(media.kind) : "";
+  const isCurrent = draft.id === state.current.id;
+  const shareResult = postShareResult?.draftId === draft.id && postShareResult?.mediaId === media?.id ? postShareResult.result : null;
+  const startShare = () => {
+    if (!file || !canShareFile || over || postShareBusy || saveBusy) return;
+    void shareWithMedia(draft, file);
+  };
+  const mediaMessage = view?.status === "loading"
+    ? `${noun}を準備しています…`
+    : view?.status === "missing"
+      ? `${noun}を読み込めません。${isCurrent ? `閉じて元の${noun}を選び直してください。` : `本文だけ渡して、Xで元の${noun}を添付してください。`}`
+      : view?.status === "error"
+        ? `${noun}の読み込みに失敗しました。もう一度読み込めます。`
+        : !canShareFile
+          ? `このブラウザでは${noun}と本文をまとめて共有できません。スマホのSafariやChromeで開くか、本文だけ渡してXで${noun}を添付してください。`
+          : `${noun}と本文をまとめて渡します。`;
+  const resultMessage = shareResult === "failed"
+    ? "共有できませんでした。写真・動画と本文は残っています。もう一度お試しください。"
+    : shareResult === "cancelled"
+      ? "共有をキャンセルしました。写真・動画と本文はそのままです。"
+      : shareResult === "stuck"
+        ? "共有結果を確認できませんでした。Xで添付を確認するか、共有画面を閉じてからもう一度お試しください。"
+        : shareResult === "shared"
+          ? "共有先へ渡しました。Xで写真・動画と本文を確認してから投稿してください。"
+          : null;
 
   return (
     <div className="handoff">
@@ -83,21 +107,35 @@ function PostSheetBody({ draft }: { draft: Draft }) {
           ) : (
             <span className="attach-thumb-empty" aria-hidden="true" />
           )}
-          <p>
-            リンクで渡せるのは本文です。{canShareFile ? `「${noun}付きで共有」から一緒に渡すか、Xで添付できます。` : `${noun}はXの投稿画面で添付できます。`}
-          </p>
+          <p>{mediaMessage}</p>
         </div>
       ) : null}
 
       <div className="sheet-actions">
+        {media ? (
+          <>
+            <button type="button" className="primary-button" disabled={over || !canShareFile || postShareBusy || saveBusy} onClick={startShare}>
+              <ShareNetworkIcon size={20} weight="bold" aria-hidden="true" />
+              {postShareBusy ? "共有画面を開いています…" : `${noun}と本文をXへ`}
+            </button>
+            {canShareFile ? <p className="hint is-center">次の共有画面でXを選んでください。</p> : null}
+            {resultMessage ? <p className="hint" role="status">{resultMessage}</p> : null}
+            {view?.status === "error" ? (
+              <button type="button" className="secondary-button" onClick={view.retry}>{noun}をもう一度読み込む</button>
+            ) : null}
+            {view?.status === "missing" && isCurrent ? (
+              <button type="button" className="secondary-button" onClick={nav.closeSheet}>{noun}を選び直すために戻る</button>
+            ) : null}
+          </>
+        ) : null}
         {over ? (
-          <button type="button" className="primary-button" disabled>
-            {openLabel}
+          <button type="button" className={media ? "secondary-button" : "primary-button"} disabled>
+            {media ? (appUrl ? "本文だけでXアプリを開く" : "本文だけでXを開く") : openLabel}
             <ArrowSquareOutIcon size={18} weight="bold" aria-hidden="true" />
           </button>
         ) : (
           <a
-            className="primary-button"
+            className={media ? "secondary-button" : "primary-button"}
             href={appUrl ?? webUrl}
             target={appUrl ? "_self" : "_blank"}
             rel="noopener noreferrer"
@@ -106,18 +144,18 @@ function PostSheetBody({ draft }: { draft: Draft }) {
               showToast("Xへの移動を開始しました。投稿内容はXで確認してください");
             }}
           >
-            {openLabel}
+            {media ? (appUrl ? "本文だけでXアプリを開く" : "本文だけでXを開く") : openLabel}
             <ArrowSquareOutIcon size={18} weight="bold" aria-hidden="true" />
           </a>
         )}
         {appUrl ? (
           <>
-            <p className="hint is-center">アプリが開かない場合は、本文をコピーしてXに貼り付けるか、ブラウザ版をお使いください。</p>
+            <p className="hint is-center">{media ? `本文だけ開く場合は、${noun}をXで添付してください。` : "アプリが開かない場合は、本文をコピーしてXに貼り付けるか、ブラウザ版をお使いください。"}</p>
             {over ? (
-              <button type="button" className="secondary-button" disabled>ブラウザ版で開く</button>
+              <button type="button" className="secondary-button" disabled>{media ? "本文だけでブラウザ版を開く" : "ブラウザ版で開く"}</button>
             ) : (
               <a className="secondary-button" href={webUrl} target="_blank" rel="noopener noreferrer" onClick={() => markOpenedInX(draft.id)}>
-                ブラウザ版で開く
+                {media ? "本文だけでブラウザ版を開く" : "ブラウザ版で開く"}
               </a>
             )}
           </>
@@ -126,25 +164,6 @@ function PostSheetBody({ draft }: { draft: Draft }) {
           <CopyIcon size={18} aria-hidden="true" />
           本文をコピー
         </button>
-        {media && view?.status === "loading" && typeof navigator.share === "function" ? (
-          // The file is still loading: the share button appears disabled so that tapping it
-          // always calls navigator.share() synchronously (iOS user activation).
-          <button type="button" className="secondary-button" disabled>
-            <ShareNetworkIcon size={18} weight="bold" aria-hidden="true" />
-            {noun}付きで共有
-          </button>
-        ) : null}
-        {file && media && canShareFile ? (
-          <button
-            type="button"
-            className="secondary-button"
-            disabled={over}
-            onClick={() => void shareWithMedia(draft, file)}
-          >
-            <ShareNetworkIcon size={18} weight="bold" aria-hidden="true" />
-            {noun}付きで共有
-          </button>
-        ) : null}
         <button type="button" className="text-button" onClick={nav.closeSheet}>
           閉じる
         </button>

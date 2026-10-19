@@ -227,7 +227,7 @@ function RecordControls({ openPicker }: { openPicker: () => void }) {
 }
 
 function MediaBlock({ openPicker }: { openPicker: () => void }) {
-  const { state, persistence, captureKind, saveBusy, captureBusy, saveMedia, confirmSaved, saveAgain } = useApp();
+  const { state, persistence, captureKind, saveBusy, postShareBusy, captureBusy, saveMedia, confirmSaved, saveAgain } = useApp();
   const draft = state.current;
   const media = draft.media;
   const view = useMedia(persistence, media?.id, { remember: true });
@@ -263,7 +263,7 @@ function MediaBlock({ openPicker }: { openPicker: () => void }) {
       <DeviceSaveStatus
         media={media}
         busy={saveBusy}
-        ready={view?.status === "ready"}
+        ready={view?.status === "ready" && !postShareBusy}
         onSave={() => void saveMedia(draft.id)}
         onSaveByDownload={() => void saveMedia(draft.id, "download")}
         onConfirm={() => confirmSaved(draft.id, media.id)}
