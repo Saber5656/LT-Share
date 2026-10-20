@@ -159,7 +159,7 @@ test("main flow: record, optionally save, post to X, move on, and survive a relo
   const expectedText = `${body}\n\n開発者：\n\n#TechLTNight #Rust`;
   await expect(sheet.getByLabel("Xに渡す本文")).toHaveText(expectedText);
 
-  const xLink = sheet.getByRole("link", { name: "本文だけでXを開く", exact: true });
+  const xLink = sheet.getByRole("link", { name: "本文だけでXを開く", exact: true, includeHidden: true });
   await expect(xLink).not.toHaveClass(/\bprimary-button\b/);
   const href = await xLink.getAttribute("href");
   expect(href).toBe(`https://x.com/intent/post?text=${encodeURIComponent(expectedText)}`);
@@ -180,6 +180,7 @@ test("main flow: record, optionally save, post to X, move on, and survive a relo
   expect(second?.activation).toBe(true);
 
   // The real anchor opens X in a new tab and marks the draft as opened (never as posted)
+  await sheet.locator("summary").filter({ hasText: "共有できない場合" }).click();
   const popup = page.waitForEvent("popup");
   await xLink.click();
   await (await popup).close();
@@ -234,7 +235,7 @@ test("main flow: record, optionally save, post to X, move on, and survive a relo
   await expect(page.getByRole("img", { name: "記録した写真" })).toBeVisible();
   await expect(page.getByLabel("保存した投稿案の本文")).toHaveText(expectedText);
   await page.getByRole("button", { name: "もう一度ポスト確認" }).click();
-  await expect(page.getByRole("dialog", { name: "ポスト確認" }).getByRole("link", { name: "本文だけでXを開く", exact: true })).toHaveAttribute(
+  await expect(page.getByRole("dialog", { name: "ポスト確認" }).getByRole("link", { name: "本文だけでXを開く", exact: true, includeHidden: true })).toHaveAttribute(
     "href",
     `https://x.com/intent/post?text=${encodeURIComponent(expectedText)}`,
   );
@@ -538,14 +539,14 @@ test("the phone's back button moves between screens", async ({ page }) => {
   await expect(page.getByText("1本目の投稿案")).toBeVisible();
 });
 
-test("when the browser blocks on-device storage the app says so and keeps working in memory", async ({ page }) => {
+test("unavailable storage has no persistent warning and keeps working in memory", async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window, "indexedDB", { value: undefined, configurable: true });
   });
   await open(page);
 
-  await expect(page.getByRole("alert").filter({ hasText: "このブラウザでは端末内への保存を使えません" })).toBeVisible();
   await bodyBox(page).fill("入力は続けられる");
+  await expect(page.getByRole("alert").filter({ hasText: "このブラウザでは端末内への保存を使えません" })).toHaveCount(0);
   await expect(bodyBox(page)).toHaveValue("入力は続けられる");
   await page.getByRole("button", { name: "ポスト確認" }).click();
   await expect(page.getByRole("dialog", { name: "ポスト確認" }).getByRole("link", { name: /Xで開く/ })).toBeVisible();
@@ -568,7 +569,7 @@ test("a storage that never answers offers 再読込 or continuing without saving
 
   await page.getByRole("button", { name: "保存せずに続ける" }).click();
   await expect(page.getByText("1本目の投稿案")).toBeVisible();
-  await expect(page.getByRole("alert").filter({ hasText: "保存せずに使っています" })).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "保存せずに使っています" })).toHaveCount(0);
   await bodyBox(page).fill("保存せずに入力できる");
   await expect(bodyBox(page)).toHaveValue("保存せずに入力できる");
 });
@@ -656,7 +657,8 @@ test("a second tab is read-only, writes nothing, and becomes editable once the f
   await expect(bodyBox(second)).toHaveValue("二つ目のタブで編集");
 });
 
-test("a write failure (e.g. storage full) is shown without losing anything, and 次の投稿へ waits for a retry", async ({
+for (const recovery of ["toast retry", "next tap"] as const) {
+test(`write failure has no persistent warning; next preserves data and recovers by ${recovery}`, async ({
   page,
 }) => {
   await page.addInitScript(() => {
@@ -670,9 +672,11 @@ test("a write failure (e.g. storage full) is shown without losing anything, and 
   });
   await open(page);
 
+  await recordPhoto(page);
   await bodyBox(page).fill("容量不足でも入力は消えない");
   const banner = page.getByRole("alert").filter({ hasText: "端末内（ブラウザ）に保存できませんでした" });
-  await expect(banner).toBeVisible();
+  await page.waitForTimeout(600); // Allow the debounced write to fail.
+  await expect(banner).toHaveCount(0);
   await expect(bodyBox(page)).toHaveValue("容量不足でも入力は消えない");
 
   // FR-10: the draft is not stored, so the app does not move on and keeps it on screen.
@@ -681,15 +685,26 @@ test("a write failure (e.g. storage full) is shown without losing anything, and 
   await expect(page.getByText("1本目の投稿案")).toBeVisible();
   await expect(bodyBox(page)).toHaveValue("容量不足でも入力は消えない");
 
-  // Space is available again: retry stores everything and the banner goes away.
+  await expect(page.getByRole("img", { name: "記録した写真" })).toBeVisible();
+
+  // Space is available again: recover through the failed-next toast or another next tap.
   await page.evaluate(() => {
     (window as unknown as { __failWrites: boolean }).__failWrites = false;
   });
-  await banner.getByRole("button", { name: "再試行" }).click();
-  await expect(banner).toHaveCount(0);
-  await page.getByRole("button", { name: "次の投稿へ" }).click();
+  if (recovery === "toast retry") {
+    await page.getByRole("status").filter({ hasText: "次へ進めません" }).getByRole("button", { name: "再試行" }).click();
+  } else {
+    await page.getByRole("button", { name: "次の投稿へ" }).click();
+  }
   await expect(page.getByText("2本目の投稿案")).toBeVisible();
+  await page.reload();
+  await page.getByRole("button", { name: /保存した投稿案 1/ }).click();
+  await expect(page.getByTestId("draft-row")).toContainText("容量不足でも入力は消えない");
+  const original = page.getByTestId("draft-row").locator("img");
+  await expect(original).toBeVisible();
+  expect(await original.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
 });
+}
 
 test("persistent storage is requested once; on start only orphaned blobs are cleaned up", async ({ page }) => {
   await page.addInitScript(() => {

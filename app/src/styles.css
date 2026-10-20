@@ -1137,6 +1137,19 @@ button:disabled {
   margin-top: 16px;
 }
 
+/* Keep the supported photo share path prominent; alternatives remain accessible. */
+.share-alternatives > summary {
+  min-height: 44px;
+  padding: 12px 0;
+  color: var(--lt-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.share-alternatives .sheet-actions {
+  margin-top: 4px;
+}
+
 /* ---------- Toast ---------- */
 
 .toast {

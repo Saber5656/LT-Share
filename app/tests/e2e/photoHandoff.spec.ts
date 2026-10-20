@@ -18,6 +18,23 @@ const persistedBodies = (page: Page) => page.evaluate(() => new Promise<string[]
   };
 }));
 
+async function expectAlternatives(page: Page, open: boolean) {
+  const details = sheet(page).locator("details").filter({ has: page.locator("summary", { hasText: "共有できない場合" }) });
+  await expect(details).toHaveCount(1);
+  await expect(details).toHaveJSProperty("open", open);
+  const link = details.getByRole("link", { name: "本文だけでXを開く", exact: true, includeHidden: true });
+  const copy = details.getByRole("button", { name: "本文をコピー", exact: true, includeHidden: true });
+  await expect(link).toHaveCount(1);
+  await expect(copy).toHaveCount(1);
+  if (open) {
+    await expect(link).toBeVisible();
+    await expect(copy).toBeVisible();
+  } else {
+    await expect(link).toBeHidden();
+    await expect(copy).toBeHidden();
+  }
+}
+
 async function start(page: Page, mode: Mode = "ok") {
   await page.addInitScript((mode) => {
     localStorage.setItem("lt-share:welcome-seen", "1");
@@ -55,6 +72,7 @@ async function start(page: Page, mode: Mode = "ok") {
 
 test("primary handoff carries original photo bytes and final text in the tap task", async ({ page }) => {
   await start(page);
+  await expectAlternatives(page, false);
   await page.screenshot({ path: process.env.LT_PHOTO_SCREENSHOT ?? "test-results/photo-handoff.png", animations: "disabled" });
   await expect(primary(page)).toHaveClass(/primary-button/);
   await expect(sheet(page).getByText("次の共有画面でXを選んでください。", { exact: true })).toBeVisible();
@@ -73,6 +91,7 @@ for (const mode of ["abort", "fail"] as const) {
     await primary(page).click();
     await expect(sheet(page).getByRole("status")).toContainText(mode === "abort" ? "キャンセル" : "共有できませんでした");
     await expect(primary(page)).toBeEnabled();
+    await expectAlternatives(page, mode === "fail");
     await expect(sheet(page).getByLabel("Xに渡す本文")).toHaveText(expected);
     await primary(page).click();
     expect(await calls(page)).toHaveLength(2);
@@ -84,6 +103,7 @@ for (const mode of ["abort", "fail"] as const) {
 
 test("unsupported sharing never presents a text-only link as the primary action", async ({ page }) => {
   await start(page, "unsupported");
+  await expectAlternatives(page, true);
   await expect(primary(page)).toBeDisabled();
   await expect(sheet(page).getByText(/このブラウザでは写真と本文をまとめて共有できません/)).toBeVisible();
   await expect(sheet(page).locator("a.primary-button")).toHaveCount(0);
@@ -106,6 +126,7 @@ test("pending share is single-flight and an unsettled share becomes retryable", 
   await page.clock.fastForward(60_001);
   await expect(primary(page)).toBeEnabled();
   await expect(sheet(page).getByRole("status")).toContainText("共有結果を確認できませんでした");
+  await expectAlternatives(page, true);
 });
 
 test("missing original blocks photo handoff and offers reselect", async ({ page }) => {
@@ -126,6 +147,7 @@ test("missing original blocks photo handoff and offers reselect", async ({ page 
   await page.getByRole("button", { name: "ポスト確認", exact: true }).click();
   await expect(primary(page)).toBeDisabled();
   await expect(sheet(page).getByText(/写真を読み込めません/)).toBeVisible();
+  await expectAlternatives(page, true);
   await sheet(page).getByRole("button", { name: "写真を選び直すために戻る" }).click();
   await expect(sheet(page)).not.toBeVisible();
   expect(await calls(page)).toHaveLength(0);
@@ -152,8 +174,36 @@ test("slow storage keeps media primary disabled until the original File is ready
   await page.getByRole("button", { name: "ポスト確認", exact: true }).click();
   await expect(primary(page)).toBeDisabled();
   await expect(sheet(page).getByText("写真を準備しています…", { exact: true })).toBeVisible();
+  await expectAlternatives(page, false);
   await expect(sheet(page).locator("a.primary-button")).toHaveCount(0);
   await expect(primary(page)).toBeEnabled();
+  await expectAlternatives(page, false);
   await primary(page).click();
   expect((await calls(page))[0]).toMatchObject({ text: expected, activation: true, sameTask: true });
+});
+
+test("original read error opens alternatives without losing the stored photo", async ({ page }) => {
+  await page.addInitScript(() => {
+    const get = IDBObjectStore.prototype.get;
+    IDBObjectStore.prototype.get = function (...args: Parameters<IDBObjectStore["get"]>) {
+      if (this.name === "media" && sessionStorage.getItem("failOriginalRead") === "1") {
+        throw new DOMException("read failed", "UnknownError");
+      }
+      return get.apply(this, args);
+    };
+  });
+  await start(page);
+  await expect.poll(() => persistedBodies(page)).toContain(body);
+  await page.evaluate(() => sessionStorage.setItem("failOriginalRead", "1"));
+  await page.reload();
+  await page.getByRole("button", { name: "ポスト確認", exact: true }).click();
+  await expect(primary(page)).toBeDisabled();
+  await expectAlternatives(page, true);
+  expect(await calls(page)).toHaveLength(0);
+  await page.evaluate(() => sessionStorage.removeItem("failOriginalRead"));
+  await page.reload();
+  await expect(page.getByRole("img", { name: "記録した写真" })).toBeVisible();
+  await page.getByRole("button", { name: "ポスト確認", exact: true }).click();
+  await expect(primary(page)).toBeEnabled();
+  await expectAlternatives(page, false);
 });

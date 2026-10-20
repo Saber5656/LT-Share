@@ -92,45 +92,21 @@ export function PostCounter({ count }: { count: number }) {
   );
 }
 
+// Only an editing restriction needs a persistent banner. Routine browser-save
+// status is deliberately absent from the capture/post flow.
 export function StorageBanner() {
-  const { storageProblem, retryStorage } = useApp();
-  if (!storageProblem) return null;
+  const { storageProblem } = useApp();
+  if (storageProblem?.kind !== "readonly") return null;
 
   return (
-    <div className={`app-banner${storageProblem.kind === "readonly" ? " is-sticky" : ""}`}>
+    <div className="app-banner is-sticky">
       <div className="notice is-error" role="alert">
         <WarningCircleIcon size={20} weight="fill" aria-hidden="true" />
         <div>
-          {storageProblem.kind === "unavailable" ? (
-            <p>
-              このブラウザでは端末内への保存を使えません（プライベートブラウズなど）。入力した内容と写真・動画は、このページを閉じると失われます。
-            </p>
-          ) : storageProblem.kind === "skipped" ? (
-            <>
-              <p>
-                保存せずに使っています。入力した内容と写真・動画は、このページを閉じると失われます。保存済みの投稿案はこの画面には表示されません。
-              </p>
-              <button type="button" className="inline-action" onClick={() => window.location.reload()}>
-                再読込
-              </button>
-            </>
-          ) : storageProblem.kind === "readonly" ? (
-            <>
-              <p>別のタブで開いています。このタブでは編集できません。</p>
-              <button type="button" className="inline-action" onClick={() => window.location.reload()}>
-                再読込
-              </button>
-            </>
-          ) : (
-            <>
-              <p>
-                端末内（ブラウザ）に保存できませんでした。容量不足などが考えられます。操作は続けられますが、このページを閉じると失われる可能性があります。
-              </p>
-              <button type="button" className="inline-action" onClick={() => void retryStorage()}>
-                再試行
-              </button>
-            </>
-          )}
+          <p>別のタブで開いています。このタブでは編集できません。</p>
+          <button type="button" className="inline-action" onClick={() => window.location.reload()}>
+            再読込
+          </button>
         </div>
       </div>
     </div>

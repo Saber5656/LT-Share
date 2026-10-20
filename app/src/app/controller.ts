@@ -61,7 +61,6 @@ export type App = {
   // The kind of the file being stored right now, or null. 次の投稿へ waits for it.
   captureBusy: MediaKind | null;
   storageProblem: StorageProblem | null;
-  retryStorage: () => Promise<void>;
   toast: ToastState | null;
   showToast: (message: string, action?: ToastAction) => void;
   captureFile: (file: File, fallbackKind: MediaKind, source?: "library") => Promise<void>;
@@ -200,12 +199,6 @@ export function useController({
   useEffect(() => {
     persistence.retainMedia(currentMediaId ? [currentMediaId] : []);
   }, [persistence, currentMediaId]);
-
-  const retryStorage = useCallback(async () => {
-    await persistence.retryUnpersistedMedia();
-    const ok = await persist();
-    if (ok) showToast("端末内（ブラウザ）に保存しました");
-  }, [persistence, persist, showToast]);
 
   /* ---------- Server AI with cancellation and stale-result protection ---------- */
 
@@ -504,7 +497,6 @@ export function useController({
     saveBusy,
     captureBusy,
     storageProblem,
-    retryStorage,
     toast,
     showToast,
     captureFile,

@@ -86,6 +86,50 @@ function PostSheetBody({ draft }: { draft: Draft }) {
           ? "共有先へ渡しました。Xで写真・動画と本文を確認してから投稿してください。"
           : null;
 
+  const fallbackNeeded = view?.status === "missing" || view?.status === "error"
+    || (view?.status === "ready" && !canShareFile)
+    || shareResult === "failed" || shareResult === "stuck";
+  const textActions = (
+    <>
+        {over ? (
+          <button type="button" className={media ? "secondary-button" : "primary-button"} disabled>
+            {media ? (appUrl ? "本文だけでXアプリを開く" : "本文だけでXを開く") : openLabel}
+            <ArrowSquareOutIcon size={18} weight="bold" aria-hidden="true" />
+          </button>
+        ) : (
+          <a
+            className={media ? "secondary-button" : "primary-button"}
+            href={appUrl ?? webUrl}
+            target={appUrl ? "_self" : "_blank"}
+            rel="noopener noreferrer"
+            onClick={() => {
+              markOpenedInX(draft.id);
+              showToast("Xへの移動を開始しました。投稿内容はXで確認してください");
+            }}
+          >
+            {media ? (appUrl ? "本文だけでXアプリを開く" : "本文だけでXを開く") : openLabel}
+            <ArrowSquareOutIcon size={18} weight="bold" aria-hidden="true" />
+          </a>
+        )}
+        {appUrl ? (
+          <>
+            <p className="hint is-center">{media ? `本文だけ開く場合は、${noun}をXで添付してください。` : "アプリが開かない場合は、本文をコピーしてXに貼り付けるか、ブラウザ版をお使いください。"}</p>
+            {over ? (
+              <button type="button" className="secondary-button" disabled>{media ? "本文だけでブラウザ版を開く" : "ブラウザ版で開く"}</button>
+            ) : (
+              <a className="secondary-button" href={webUrl} target="_blank" rel="noopener noreferrer" onClick={() => markOpenedInX(draft.id)}>
+                {media ? "本文だけでブラウザ版を開く" : "ブラウザ版で開く"}
+              </a>
+            )}
+          </>
+        ) : null}
+        <button type="button" className="secondary-button" disabled={copyBusy} onClick={() => void copyText()}>
+          <CopyIcon size={18} aria-hidden="true" />
+          本文をコピー
+        </button>
+    </>
+  );
+
   return (
     <div className="handoff">
       <pre className="post-preview" aria-label="Xに渡す本文">
@@ -128,42 +172,12 @@ function PostSheetBody({ draft }: { draft: Draft }) {
             ) : null}
           </>
         ) : null}
-        {over ? (
-          <button type="button" className={media ? "secondary-button" : "primary-button"} disabled>
-            {media ? (appUrl ? "本文だけでXアプリを開く" : "本文だけでXを開く") : openLabel}
-            <ArrowSquareOutIcon size={18} weight="bold" aria-hidden="true" />
-          </button>
-        ) : (
-          <a
-            className={media ? "secondary-button" : "primary-button"}
-            href={appUrl ?? webUrl}
-            target={appUrl ? "_self" : "_blank"}
-            rel="noopener noreferrer"
-            onClick={() => {
-              markOpenedInX(draft.id);
-              showToast("Xへの移動を開始しました。投稿内容はXで確認してください");
-            }}
-          >
-            {media ? (appUrl ? "本文だけでXアプリを開く" : "本文だけでXを開く") : openLabel}
-            <ArrowSquareOutIcon size={18} weight="bold" aria-hidden="true" />
-          </a>
-        )}
-        {appUrl ? (
-          <>
-            <p className="hint is-center">{media ? `本文だけ開く場合は、${noun}をXで添付してください。` : "アプリが開かない場合は、本文をコピーしてXに貼り付けるか、ブラウザ版をお使いください。"}</p>
-            {over ? (
-              <button type="button" className="secondary-button" disabled>{media ? "本文だけでブラウザ版を開く" : "ブラウザ版で開く"}</button>
-            ) : (
-              <a className="secondary-button" href={webUrl} target="_blank" rel="noopener noreferrer" onClick={() => markOpenedInX(draft.id)}>
-                {media ? "本文だけでブラウザ版を開く" : "ブラウザ版で開く"}
-              </a>
-            )}
-          </>
-        ) : null}
-        <button type="button" className="secondary-button" disabled={copyBusy} onClick={() => void copyText()}>
-          <CopyIcon size={18} aria-hidden="true" />
-          本文をコピー
-        </button>
+        {media ? (
+          <details className="share-alternatives" open={fallbackNeeded || undefined}>
+            <summary>共有できない場合</summary>
+            <div className="sheet-actions">{textActions}</div>
+          </details>
+        ) : textActions}
         <button type="button" className="text-button" onClick={nav.closeSheet}>
           閉じる
         </button>
