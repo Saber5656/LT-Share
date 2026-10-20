@@ -1,0 +1,13 @@
+node_modules
+dist
+test-results
+playwright-report
+
+worker-dist/
+.env.local
+
+.e2e-dist/
+.local-ai-qa/
+.wrangler/
+.dev.vars
+.dev.vars.*
